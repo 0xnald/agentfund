@@ -13,7 +13,7 @@ type CallState =
 const payloadTemplates: Record<string, string> = {
   scan_xlayer_market: JSON.stringify(
     {
-      strategy: "X Layer momentum",
+      strategy: "Find the strongest X Layer momentum opportunity from live market data",
       maxTokens: 10
     },
     null,

@@ -37,6 +37,7 @@ NEXT_PUBLIC_AGENTFUND_CHAIN_ID=196
 NEXT_PUBLIC_AGENTFUND_CHAIN_NAME=X Layer Mainnet
 XLAYER_RPC_URL=https://rpc.xlayer.tech
 DEXSCREENER_CHAIN_ID=xlayer
+AGENTFUND_DISCOVERY_QUERIES=xlayer,okx,okb
 AGENTFUND_WATCHLIST=
 LLM_API_KEY=
 LLM_BASE_URL=https://router-api.0g.ai/v1
@@ -54,7 +55,7 @@ X402_ASSET_SYMBOL=USD₮0
 X402_RECEIVER=0x0b95dF99653f9dA5cBdeaAbeb5B4110dE9D1073a
 ```
 
-`AGENTFUND_WATCHLIST` must be a comma-separated list of real X Layer token addresses before live market scans can return ranked results.
+`scan_xlayer_market` discovers live candidates from DexScreener token profiles, boosted tokens, and configured search queries, then ranks the best X Layer opportunities. `AGENTFUND_WATCHLIST` is optional and only forces known token contract addresses into the scan.
 
 For production x402 settlement, create an OKX Developer Portal API key and set `OKX_API_KEY`, `OKX_SECRET_KEY`, and `OKX_PASSPHRASE`. The receiving wallet is `X402_RECEIVER`. X Layer mainnet must use CAIP-2 network `eip155:196`; supported payment tokens are USD₮0 and USDG.
 

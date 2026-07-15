@@ -1,7 +1,14 @@
 import { z } from "zod";
 import { callStrategyModel } from "@/lib/agent/llm";
 import { confidenceFromScore, scorePair } from "@/lib/agent/scoring";
-import { fetchTokenPairs, pickPrimaryPair } from "@/lib/market/dexscreener";
+import {
+  discoveryQueries,
+  fetchLatestTokenBoosts,
+  fetchLatestTokenProfiles,
+  fetchTokenPairs,
+  pickPrimaryPair,
+  searchPairs
+} from "@/lib/market/dexscreener";
 import { getChainSnapshot, getWatchlist, parseAddress } from "@/lib/xlayer/client";
 import { ServiceId } from "@/lib/services/catalog";
 import {
@@ -39,22 +46,53 @@ async function marketFacts(tokenAddress: `0x${string}`) {
 
 async function scanXLayerMarket(input: unknown) {
   const request = scanMarketSchema.parse(input);
-  const watchlist = getWatchlist().slice(0, request.maxTokens);
 
-  if (watchlist.length === 0) {
-    throw new Error("AGENTFUND_WATCHLIST must contain at least one X Layer token address for live market scans.");
+  const forcedWatchlist = getWatchlist();
+  const [profiles, boosts, searchResults] = await Promise.all([
+    fetchLatestTokenProfiles().catch(() => []),
+    fetchLatestTokenBoosts().catch(() => []),
+    Promise.all(discoveryQueries().map((query) => searchPairs(query).catch(() => []))).then((results) => results.flat())
+  ]);
+
+  const discoveredAddresses = [
+    ...profiles.map((profile) => profile.tokenAddress),
+    ...boosts.map((boost) => boost.tokenAddress),
+    ...searchResults.map((pair) => pair.baseToken.address),
+    ...forcedWatchlist
+  ];
+
+  const candidates = [...new Set(discoveredAddresses.map((address) => address.toLowerCase()))]
+    .filter((address) => address.startsWith("0x"))
+    .slice(0, Math.max(request.maxTokens * 3, request.maxTokens))
+    .map((address) => parseAddress(address, "discovered token"));
+
+  if (candidates.length === 0) {
+    throw new Error(
+      "No live X Layer candidates found from DexScreener discovery. Add AGENTFUND_DISCOVERY_QUERIES or AGENTFUND_WATCHLIST with token contract addresses."
+    );
   }
 
   const [chain, tokens] = await Promise.all([
     getChainSnapshot(),
-    Promise.all(watchlist.map((token) => marketFacts(token)))
+    Promise.all(candidates.map((token) => marketFacts(token).catch(() => undefined)))
   ]);
 
-  const ranked = tokens.sort((a, b) => b.score.score - a.score.score);
+  const ranked = tokens
+    .filter((token) => token !== undefined)
+    .sort((a, b) => b.score.score - a.score.score)
+    .slice(0, request.maxTokens);
 
   return {
     strategy: request.strategy,
     chain,
+    discovery: {
+      mode: "live_dexscreener_market_discovery",
+      queries: discoveryQueries(),
+      profileCandidates: profiles.length,
+      boostCandidates: boosts.length,
+      searchPairs: searchResults.length,
+      forcedWatchlist: forcedWatchlist.length
+    },
     ranked,
     generatedAt: new Date().toISOString()
   };
