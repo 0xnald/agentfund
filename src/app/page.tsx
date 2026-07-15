@@ -1,22 +1,44 @@
 import { Activity, ShieldCheck, TerminalSquare } from "lucide-react";
+import Image from "next/image";
+import { AgentTerminal } from "@/components/AgentTerminal";
 import { serviceCatalog } from "@/lib/services/catalog";
 
 export default function Home() {
+  const services = Object.values(serviceCatalog);
+
   return (
     <main className="shell">
+      <header className="topbar">
+        <a className="brand" href="/">
+          <Image src="/agentfund-logo.png" alt="AgentFund logo" width={56} height={40} priority />
+          <span>AgentFund</span>
+        </a>
+        <nav>
+          <a href="/api/asp/catalog">Catalog</a>
+          <a href="#services">Services</a>
+          <a href="#terminal">Terminal</a>
+        </nav>
+      </header>
+
       <section className="mast">
         <div>
-          <p className="eyebrow">A2MCP ASP for OKX.AI</p>
-          <h1>AgentFund</h1>
+          <p className="eyebrow">A2MCP ASP for OKX.AI on X Layer</p>
+          <h1>Autonomous strategy intelligence, priced per call.</h1>
           <p className="lede">
-            Paid strategy intelligence for autonomous finance agents on X Layer:
-            market scans, trade signals, risk checks, NAV calculations, and public
-            agent updates.
+            AgentFund gives OKX.AI agents a real paid service layer for market
+            scans, trade signals, risk checks, NAV calculations, and public agent
+            updates. Execution remains user controlled.
           </p>
+          <div className="heroActions">
+            <a href="#terminal">Open Terminal</a>
+            <a href="/api/asp/catalog">View ASP Catalog</a>
+          </div>
         </div>
         <div className="status">
-          <span>Receiver</span>
-          <strong>0x0b95...073a</strong>
+          <Image src="/agentfund-logo.png" alt="" width={168} height={120} />
+          <span>Payment receiver</span>
+          <strong>0x0b95dF99653f9dA5cBdeaAbeb5B4110dE9D1073a</strong>
+          <small>X Layer Mainnet · OKB</small>
         </div>
       </section>
 
@@ -38,10 +60,10 @@ export default function Home() {
         </div>
       </section>
 
-      <section className="services">
+      <section className="services" id="services">
         <h2>ASP Services</h2>
         <div className="serviceList">
-          {Object.values(serviceCatalog).map((service) => (
+          {services.map((service) => (
             <article className="service" key={service.id}>
               <div>
                 <h3>{service.name}</h3>
@@ -52,6 +74,8 @@ export default function Home() {
           ))}
         </div>
       </section>
+
+      <AgentTerminal services={services} />
     </main>
   );
 }

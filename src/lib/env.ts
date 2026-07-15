@@ -2,6 +2,7 @@ import { z } from "zod";
 
 const envSchema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
+  NEXT_PUBLIC_SITE_URL: z.string().url().default("http://localhost:3000"),
   NEXT_PUBLIC_AGENTFUND_RECEIVER_ADDRESS: z.string().startsWith("0x"),
   NEXT_PUBLIC_AGENTFUND_CHAIN_ID: z.coerce.number().int().positive().default(196),
   NEXT_PUBLIC_AGENTFUND_CHAIN_NAME: z.string().default("X Layer Mainnet"),
@@ -28,6 +29,7 @@ const envSchema = z.object({
 
 export const env = envSchema.parse({
   NODE_ENV: process.env.NODE_ENV,
+  NEXT_PUBLIC_SITE_URL: process.env.NEXT_PUBLIC_SITE_URL,
   NEXT_PUBLIC_AGENTFUND_RECEIVER_ADDRESS:
     process.env.NEXT_PUBLIC_AGENTFUND_RECEIVER_ADDRESS ?? "0x0b95dF99653f9dA5cBdeaAbeb5B4110dE9D1073a",
   NEXT_PUBLIC_AGENTFUND_CHAIN_ID: process.env.NEXT_PUBLIC_AGENTFUND_CHAIN_ID,
