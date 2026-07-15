@@ -1,6 +1,30 @@
 import { createPublicClient, defineChain, formatEther, http, isAddress } from "viem";
 import { env } from "@/lib/env";
 
+const erc20MetadataAbi = [
+  {
+    inputs: [],
+    name: "decimals",
+    outputs: [{ name: "", type: "uint8" }],
+    stateMutability: "view",
+    type: "function"
+  },
+  {
+    inputs: [],
+    name: "name",
+    outputs: [{ name: "", type: "string" }],
+    stateMutability: "view",
+    type: "function"
+  },
+  {
+    inputs: [],
+    name: "symbol",
+    outputs: [{ name: "", type: "string" }],
+    stateMutability: "view",
+    type: "function"
+  }
+] as const;
+
 export const xLayer = defineChain({
   id: env.NEXT_PUBLIC_AGENTFUND_CHAIN_ID,
   name: env.NEXT_PUBLIC_AGENTFUND_CHAIN_NAME,
@@ -61,4 +85,37 @@ export function getWatchlist(): `0x${string}`[] {
     .map((item) => item.trim())
     .filter(Boolean)
     .map((item) => parseAddress(item, "AGENTFUND_WATCHLIST entry"));
+}
+
+export async function getTokenMetadata(address: `0x${string}`) {
+  const [symbol, name, decimals] = await Promise.all([
+    xLayerClient
+      .readContract({
+        address,
+        abi: erc20MetadataAbi,
+        functionName: "symbol"
+      })
+      .catch(() => "UNKNOWN"),
+    xLayerClient
+      .readContract({
+        address,
+        abi: erc20MetadataAbi,
+        functionName: "name"
+      })
+      .catch(() => "Unknown token"),
+    xLayerClient
+      .readContract({
+        address,
+        abi: erc20MetadataAbi,
+        functionName: "decimals"
+      })
+      .catch(() => 18)
+  ]);
+
+  return {
+    tokenAddress: address,
+    symbol,
+    name,
+    decimals: Number(decimals)
+  };
 }

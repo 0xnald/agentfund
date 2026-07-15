@@ -9,7 +9,7 @@ import {
   scoreOkxQuote
 } from "@/lib/market/okxDex";
 import { env } from "@/lib/env";
-import { getChainSnapshot, parseAddress } from "@/lib/xlayer/client";
+import { getChainSnapshot, getTokenMetadata, getWatchlist, parseAddress } from "@/lib/xlayer/client";
 import { ServiceId } from "@/lib/services/catalog";
 import {
   generatePostSchema,
@@ -106,7 +106,69 @@ async function marketFacts(tokenAddress?: `0x${string}`) {
 
 async function scanXLayerMarket(input: unknown) {
   const request = scanMarketSchema.parse(input);
-  const [chain, ranked] = await Promise.all([getChainSnapshot(), discoverOkxDexOpportunities(request.maxTokens)]);
+  const chain = await getChainSnapshot();
+  let ranked: OkxOpportunity[] = [];
+  let okxError: string | undefined;
+
+  try {
+    ranked = await discoverOkxDexOpportunities(request.maxTokens);
+  } catch (error) {
+    okxError = error instanceof Error ? error.message : "Unknown OKX DEX Aggregator failure.";
+  }
+
+  if (okxError) {
+    const fallbackTokens = await Promise.all(
+      getWatchlist()
+        .filter((tokenAddress) => tokenAddress.toLowerCase() !== env.OKX_DEX_QUOTE_TOKEN_ADDRESS.toLowerCase())
+        .slice(0, request.maxTokens)
+        .map(async (tokenAddress) => {
+          const metadata = await getTokenMetadata(tokenAddress);
+
+          return {
+            ...metadata,
+            source: "xlayer_onchain_watchlist_fallback",
+            quoteTokenAddress: env.OKX_DEX_QUOTE_TOKEN_ADDRESS,
+            priceUsd: 0,
+            routeCount: 0,
+            quoteRouteCount: 0,
+            priceImpactPercentage: 0,
+            quote: {
+              fromTokenAmount: "",
+              toTokenAmount: "",
+              priceImpactPercentage: "",
+              tradeFee: "",
+              dexRouterList: [],
+              quoteCompareList: [],
+              routerResult: {},
+              raw: {}
+            },
+            score: {
+              score: 25,
+              grade: "avoid" as const,
+              factors: ["verified token metadata directly from X Layer RPC"],
+              riskFlags: ["OKX DEX Aggregator route not confirmed from this runtime"]
+            }
+          };
+        })
+    );
+
+    return {
+      strategy: request.strategy,
+      chain,
+      discovery: {
+        mode: "okx_dex_aggregator_market_discovery",
+        status: "degraded",
+        chainIndex: env.OKX_DEX_CHAIN_INDEX,
+        quoteTokenAddress: env.OKX_DEX_QUOTE_TOKEN_ADDRESS,
+        tokenSource: env.OKX_DEX_TOKENS_PATH,
+        quoteSource: env.OKX_DEX_QUOTE_PATH,
+        fallback: "xlayer_onchain_watchlist_metadata",
+        upstreamError: okxError
+      },
+      ranked: fallbackTokens,
+      generatedAt: new Date().toISOString()
+    };
+  }
 
   return {
     strategy: request.strategy,
