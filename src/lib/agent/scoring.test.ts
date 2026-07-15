@@ -1,22 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { scorePair } from "./scoring";
-import { DexScreenerPair } from "../market/dexscreener";
+import { scorePair, ScoredPair } from "./scoring";
 
-const basePair: DexScreenerPair = {
-  chainId: "xlayer",
-  dexId: "test",
-  url: "https://example.com",
-  pairAddress: "0xpair",
-  baseToken: {
-    address: "0xtoken",
-    name: "Token",
-    symbol: "TOK"
-  },
-  quoteToken: {
-    address: "0xquote",
-    name: "OKB",
-    symbol: "OKB"
-  },
+const basePair: ScoredPair = {
   liquidity: {
     usd: 300_000
   },

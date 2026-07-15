@@ -1,15 +1,9 @@
 import { z } from "zod";
 import { callStrategyModel } from "@/lib/agent/llm";
 import { confidenceFromScore } from "@/lib/agent/scoring";
-import {
-  discoverOkxDexOpportunities,
-  fetchOkxDexQuote,
-  fetchOkxDexTokens,
-  OkxOpportunity,
-  scoreOkxQuote
-} from "@/lib/market/okxDex";
+import { discoverUniswapV4Opportunities } from "@/lib/market/uniswapV4";
 import { env } from "@/lib/env";
-import { getChainSnapshot, getTokenMetadata, getWatchlist, parseAddress } from "@/lib/xlayer/client";
+import { getChainSnapshot, parseAddress } from "@/lib/xlayer/client";
 import { ServiceId } from "@/lib/services/catalog";
 import {
   generatePostSchema,
@@ -26,8 +20,6 @@ export type ServiceExecutionResult = {
   data: unknown;
 };
 
-const QUOTE_TOKEN_DECIMALS = 6;
-
 function parseRequestedAddress(tokenAddress: string | undefined, fieldName: string) {
   if (!tokenAddress || tokenAddress.toLowerCase() === "auto") {
     return undefined;
@@ -36,156 +28,44 @@ function parseRequestedAddress(tokenAddress: string | undefined, fieldName: stri
   return parseAddress(tokenAddress, fieldName);
 }
 
-function decimalAmount(rawAmount: string | undefined, decimals: number) {
-  const value = Number(rawAmount ?? 0);
-
-  if (!Number.isFinite(value) || value <= 0) {
-    return 0;
-  }
-
-  return value / 10 ** decimals;
-}
-
-function markPriceUsd(opportunity: Pick<OkxOpportunity, "quote" | "decimals">) {
-  if (opportunity.quote.estimatedPriceUsd && opportunity.quote.estimatedPriceUsd > 0) {
-    return opportunity.quote.estimatedPriceUsd;
-  }
-
-  const toStable = decimalAmount(opportunity.quote.toTokenAmount, QUOTE_TOKEN_DECIMALS);
-  const fromToken = decimalAmount(opportunity.quote.fromTokenAmount, opportunity.decimals);
-  return fromToken > 0 ? toStable / fromToken : 0;
-}
-
-async function opportunityFromAddress(tokenAddress: `0x${string}`) {
-  const tokens = await fetchOkxDexTokens();
-  const token = tokens.find((candidate) => candidate.tokenContractAddress?.toLowerCase() === tokenAddress.toLowerCase());
-
-  if (!token) {
-    throw new Error(`Token ${tokenAddress} was not returned by OKX DEX Aggregator all-tokens for X Layer.`);
-  }
-
-  const decimals = Number(token.decimals ?? 18);
-  const quote = await fetchOkxDexQuote({
-    fromTokenAddress: tokenAddress,
-    amount: (10n ** BigInt(Math.max(0, decimals))).toString()
-  });
-
-  return {
-    tokenAddress,
-    symbol: token.tokenSymbol ?? "UNKNOWN",
-    name: token.tokenName ?? token.tokenSymbol ?? "Unknown token",
-    decimals,
-    quote,
-    score: scoreOkxQuote(quote)
-  };
-}
-
 async function marketFacts(tokenAddress?: `0x${string}`) {
+  const opportunities = await discoverUniswapV4Opportunities(tokenAddress ? 50 : 1);
   const opportunity = tokenAddress
-    ? await opportunityFromAddress(tokenAddress)
-    : (await discoverOkxDexOpportunities(1))[0];
+    ? opportunities.find((item) => item.tokenAddress.toLowerCase() === tokenAddress.toLowerCase())
+    : opportunities[0];
 
   if (!opportunity) {
-    throw new Error(
-      "OKX DEX Aggregator returned no executable X Layer opportunities. Check OKX API credentials/project ID and token routing availability."
-    );
+    const addressHint = tokenAddress ? ` for token ${tokenAddress}` : "";
+    throw new Error(`No Uniswap v4 X Layer pool opportunity found${addressHint} in the configured scan window.`);
   }
-
-  const priceUsd = markPriceUsd(opportunity);
 
   return {
     ...opportunity,
-    priceUsd,
-    source: "okx_dex_aggregator",
-    quoteTokenAddress: env.OKX_DEX_QUOTE_TOKEN_ADDRESS,
-    routeCount: opportunity.quote.dexRouterList?.length ?? 0,
-    quoteRouteCount: opportunity.quote.quoteCompareList?.length ?? 0,
-    priceImpactPercentage: Number(opportunity.quote.priceImpactPercentage ?? 0)
+    source: "uniswap_v4_xlayer"
   };
 }
 
 async function scanXLayerMarket(input: unknown) {
   const request = scanMarketSchema.parse(input);
   const chain = await getChainSnapshot();
-  let ranked: OkxOpportunity[] = [];
-  let okxError: string | undefined;
-
-  try {
-    ranked = await discoverOkxDexOpportunities(request.maxTokens);
-  } catch (error) {
-    okxError = error instanceof Error ? error.message : "Unknown OKX DEX Aggregator failure.";
-  }
-
-  if (okxError) {
-    const fallbackTokens = await Promise.all(
-      getWatchlist()
-        .filter((tokenAddress) => tokenAddress.toLowerCase() !== env.OKX_DEX_QUOTE_TOKEN_ADDRESS.toLowerCase())
-        .slice(0, request.maxTokens)
-        .map(async (tokenAddress) => {
-          const metadata = await getTokenMetadata(tokenAddress);
-
-          return {
-            ...metadata,
-            source: "xlayer_onchain_watchlist_fallback",
-            quoteTokenAddress: env.OKX_DEX_QUOTE_TOKEN_ADDRESS,
-            priceUsd: 0,
-            routeCount: 0,
-            quoteRouteCount: 0,
-            priceImpactPercentage: 0,
-            quote: {
-              fromTokenAmount: "",
-              toTokenAmount: "",
-              priceImpactPercentage: "",
-              tradeFee: "",
-              dexRouterList: [],
-              quoteCompareList: [],
-              routerResult: {},
-              raw: {}
-            },
-            score: {
-              score: 25,
-              grade: "avoid" as const,
-              factors: ["verified token metadata directly from X Layer RPC"],
-              riskFlags: ["OKX DEX Aggregator route not confirmed from this runtime"]
-            }
-          };
-        })
-    );
-
-    return {
-      strategy: request.strategy,
-      chain,
-      discovery: {
-        mode: "okx_dex_aggregator_market_discovery",
-        status: "degraded",
-        chainIndex: env.OKX_DEX_CHAIN_INDEX,
-        quoteTokenAddress: env.OKX_DEX_QUOTE_TOKEN_ADDRESS,
-        tokenSource: env.OKX_DEX_TOKENS_PATH,
-        quoteSource: env.OKX_DEX_QUOTE_PATH,
-        fallback: "xlayer_onchain_watchlist_metadata",
-        upstreamError: okxError
-      },
-      ranked: fallbackTokens,
-      generatedAt: new Date().toISOString()
-    };
-  }
+  const ranked = await discoverUniswapV4Opportunities(request.maxTokens);
 
   return {
     strategy: request.strategy,
     chain,
     discovery: {
-      mode: "okx_dex_aggregator_market_discovery",
-      chainIndex: env.OKX_DEX_CHAIN_INDEX,
-      quoteTokenAddress: env.OKX_DEX_QUOTE_TOKEN_ADDRESS,
-      tokenSource: env.OKX_DEX_TOKENS_PATH,
-      quoteSource: env.OKX_DEX_QUOTE_PATH,
-      ranking: "OKX executable route, route diversity, USD mark context, and price impact"
+      mode: "uniswap_v4_xlayer_onchain_scan",
+      poolManager: env.UNISWAP_V4_POOL_MANAGER_ADDRESS,
+      stateView: env.UNISWAP_V4_STATE_VIEW_ADDRESS,
+      quoter: env.UNISWAP_V4_QUOTER_ADDRESS,
+      universalRouter: env.UNISWAP_UNIVERSAL_ROUTER_ADDRESS,
+      poolDiscoveryBlocks: env.UNISWAP_V4_POOL_DISCOVERY_BLOCKS,
+      swapScanBlocks: env.UNISWAP_V4_SWAP_SCAN_BLOCKS,
+      logChunkBlocks: env.UNISWAP_V4_LOG_CHUNK_BLOCKS,
+      quoteTokenAddresses: env.UNISWAP_V4_QUOTE_TOKEN_ADDRESSES.split(",").map((item) => item.trim()).filter(Boolean),
+      ranking: "Uniswap v4 initialized pools, recent swap flow, pool liquidity, quote route, fee tier, and hook risk"
     },
-    ranked: ranked.map((opportunity) => ({
-      ...opportunity,
-      priceUsd: markPriceUsd(opportunity),
-      source: "okx_dex_aggregator"
-    })),
+    ranked,
     generatedAt: new Date().toISOString()
   };
 }
@@ -244,14 +124,13 @@ async function riskCheckTrade(input: unknown) {
   const tokenAddress = parseRequestedAddress(request.tokenAddress, "tokenAddress");
   const facts = await marketFacts(tokenAddress);
   const flags = [...facts.score.riskFlags];
-  const priceImpact = Math.abs(facts.priceImpactPercentage);
 
-  if (facts.routeCount === 0) {
-    flags.push("OKX route engine did not expose a router path");
+  if (facts.activity.swapCount === 0) {
+    flags.push("no recent Uniswap v4 swaps in scan window");
   }
 
-  if (priceImpact > 5) {
-    flags.push("OKX quote price impact exceeds 5%");
+  if (facts.pool.hooks !== "0x0000000000000000000000000000000000000000") {
+    flags.push("custom Uniswap v4 hook requires review before execution");
   }
 
   if (request.maxSlippageBps > 300) {
@@ -264,9 +143,9 @@ async function riskCheckTrade(input: unknown) {
     notionalUsd: request.notionalUsd,
     maxSlippageBps: request.maxSlippageBps,
     visibleLiquidityUsd: null,
-    okxRouteCount: facts.routeCount,
-    okxQuoteRouteCount: facts.quoteRouteCount,
-    priceImpactPercentage: facts.priceImpactPercentage,
+    uniswapPoolId: facts.poolId,
+    recentSwapCount: facts.activity.swapCount,
+    hookAddress: facts.pool.hooks,
     riskLevel: flags.length >= 3 ? "high" : flags.length >= 1 ? "medium" : "low",
     flags,
     market: facts,

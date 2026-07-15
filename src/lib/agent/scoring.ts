@@ -1,4 +1,15 @@
-import { DexScreenerPair } from "@/lib/market/dexscreener";
+export type ScoredPair = {
+  liquidity?: {
+    usd?: number;
+  };
+  volume?: {
+    h24?: number;
+  };
+  priceChange?: {
+    h24?: number;
+    h1?: number;
+  };
+};
 
 export type OpportunityScore = {
   score: number;
@@ -7,7 +18,7 @@ export type OpportunityScore = {
   riskFlags: string[];
 };
 
-export function scorePair(pair: DexScreenerPair): OpportunityScore {
+export function scorePair(pair: ScoredPair): OpportunityScore {
   const liquidity = pair.liquidity?.usd ?? 0;
   const volume24h = pair.volume?.h24 ?? 0;
   const change1h = pair.priceChange?.h1 ?? 0;

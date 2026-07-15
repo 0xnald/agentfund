@@ -23,14 +23,14 @@ export const serviceCatalog: Record<ServiceId, ServiceCatalogEntry> = {
   scan_xlayer_market: {
     id: "scan_xlayer_market",
     name: "Scan X Layer Market",
-    description: "Ranks live X Layer opportunities from OKX DEX Aggregator token discovery and executable route quotes.",
+    description: "Ranks live X Layer opportunities from Uniswap v4 PoolManager events, swap flow, quote routes, and hook risk.",
     priceUsd: env.PRICE_SCAN_XLAYER_MARKET,
     method: "POST"
   },
   score_token_opportunity: {
     id: "score_token_opportunity",
     name: "Score Token Opportunity",
-    description: "Scores one X Layer token, or auto-selects the best current route, using OKX Aggregator quote quality.",
+    description: "Scores one X Layer token, or auto-selects the best current Uniswap v4 pool opportunity.",
     priceUsd: env.PRICE_SCORE_TOKEN_OPPORTUNITY,
     method: "POST"
   },

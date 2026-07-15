@@ -8,8 +8,8 @@ The product is intentionally non-custodial: AgentFund sells market scans, opport
 
 | Service | Purpose | Default price |
 | --- | --- | --- |
-| `scan_xlayer_market` | Rank X Layer opportunities from OKX DEX Aggregator token discovery and executable route quotes | `$0.05` |
-| `score_token_opportunity` | Score one token, or auto-select the best current route, using OKX quote quality and risk flags | `$0.08` |
+| `scan_xlayer_market` | Rank X Layer opportunities from Uniswap v4 PoolManager events, swap flow, quote routes, and hook risk | `$0.05` |
+| `score_token_opportunity` | Score one token, or auto-select the best current Uniswap v4 pool opportunity | `$0.08` |
 | `generate_trade_signal` | Generate a user-controlled trade plan with model reasoning | `$0.10` |
 | `risk_check_trade` | Check proposed trade size, liquidity risk, slippage, and volatility | `$0.05` |
 | `simulate_strategy_nav` | Mark strategy positions to live token prices | `$0.06` |
@@ -36,19 +36,17 @@ NEXT_PUBLIC_AGENTFUND_RECEIVER_ADDRESS=0x0b95dF99653f9dA5cBdeaAbeb5B4110dE9D1073
 NEXT_PUBLIC_AGENTFUND_CHAIN_ID=196
 NEXT_PUBLIC_AGENTFUND_CHAIN_NAME=X Layer Mainnet
 XLAYER_RPC_URL=https://rpc.xlayer.tech
-DEXSCREENER_CHAIN_ID=xlayer
-AGENTFUND_DISCOVERY_QUERIES=xlayer,okx,okb
 AGENTFUND_WATCHLIST=
-OKX_DEX_API_BASE_URL=https://web3.okx.com
-OKX_DEX_CHAIN_INDEX=196
-OKX_DEX_PROJECT_ID=
-NEXT_PUBLIC_OKX_PROJECT_ID=
-OKX_DEX_QUOTE_TOKEN_ADDRESS=0x779ded0c9e1022225f8e0630b35a9b54be713736
-OKX_DEX_TOKENS_PATH=/api/v6/dex/aggregator/all-tokens
-OKX_DEX_QUOTE_PATH=/api/v6/dex/aggregator/quote
-OKX_DEX_SWAP_PATH=/api/v6/dex/aggregator/swap
-OKX_DEX_CHAIN_DATA_PATH=/api/v6/dex/aggregator/get-chain-data
-OKX_DEX_TIMEOUT_MS=15000
+UNISWAP_V4_POOL_MANAGER_ADDRESS=0x360e68faccca8ca495c1b759fd9eee466db9fb32
+UNISWAP_V4_POSITION_MANAGER_ADDRESS=0xcf1eafc6928dc385a342e7c6491d371d2871458b
+UNISWAP_V4_QUOTER_ADDRESS=0x8928074ca1b241d8ec02815881c1af11e8bc5219
+UNISWAP_V4_STATE_VIEW_ADDRESS=0x76fd297e2d437cd7f76d50f01afe6160f86e9990
+UNISWAP_UNIVERSAL_ROUTER_ADDRESS=0x8b844f885672f333bc0042cb669255f93a4c1e6b
+UNISWAP_V4_POOL_DISCOVERY_BLOCKS=10000
+UNISWAP_V4_SWAP_SCAN_BLOCKS=1000
+UNISWAP_V4_LOG_CHUNK_BLOCKS=100
+UNISWAP_V4_LOG_CONCURRENCY=2
+UNISWAP_V4_QUOTE_TOKEN_ADDRESSES=0x779ded0c9e1022225f8e0630b35a9b54be713736,0x4ae46a509f6b1d9056937ba4500cb143933d2dc8
 LLM_API_KEY=
 LLM_BASE_URL=https://router-api.0g.ai/v1
 LLM_MODEL=deepseek-v4-flash
@@ -66,7 +64,7 @@ X402_ASSET_SYMBOL=USD₮0
 X402_RECEIVER=0x0b95dF99653f9dA5cBdeaAbeb5B4110dE9D1073a
 ```
 
-`scan_xlayer_market` discovers X Layer candidates from OKX DEX Aggregator `all-tokens`, requests executable OKX route quotes, and ranks the best opportunities by route availability, route diversity, USD mark context, and price impact. Services that accept `tokenAddress` also accept `"auto"` to use the current top-ranked OKX route.
+`scan_xlayer_market` reads Uniswap v4 `Initialize` and `Swap` events directly from the X Layer PoolManager, derives pool price from `sqrtPriceX96`, checks quote routes against configured stable assets, and flags custom hook risk. Services that accept `tokenAddress` also accept `"auto"` to use the current top-ranked on-chain opportunity.
 
 For production x402 settlement, create an OKX Developer Portal API key and set `OKX_API_KEY`, `OKX_SECRET_KEY`, and `OKX_PASSPHRASE`. The receiving wallet is `X402_RECEIVER`. X Layer mainnet must use CAIP-2 network `eip155:196`; supported payment tokens are USD₮0 and USDG.
 
