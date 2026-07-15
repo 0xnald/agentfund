@@ -39,7 +39,7 @@ export default function Home() {
           <Image src="/agentfund-logo.png" alt="" width={168} height={120} />
           <span>Payment receiver</span>
           <strong>0x0b95dF99653f9dA5cBdeaAbeb5B4110dE9D1073a</strong>
-          <small>X Layer Mainnet · OKB</small>
+          <small>X Layer Mainnet · x402 · USD₮0 / USDG</small>
         </div>
       </section>
 

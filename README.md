@@ -24,7 +24,7 @@ GET  /api/asp/manifest
 POST /api/asp/:service
 ```
 
-Production service calls require an `X-PAYMENT` header and OKX Payment SDK verification. Local payment bypass is allowed only when `AGENTFUND_PAYMENT_MODE=disabled` and `NODE_ENV` is not `production`.
+Production service calls are protected by the official OKX x402 SDK. Unpaid calls return HTTP 402, paid calls retry with the `PAYMENT` header, and successful responses include the `PAYMENT-RESPONSE` settlement receipt. Local payment bypass is allowed only when `AGENTFUND_PAYMENT_MODE=disabled` and `NODE_ENV` is not `production`.
 
 ## Environment
 
@@ -43,14 +43,20 @@ LLM_BASE_URL=https://router-api.0g.ai/v1
 LLM_MODEL=deepseek-v4-flash
 LLM_TRUST_MODE=verified
 AGENTFUND_PAYMENT_MODE=production
-OKX_PAYMENT_VERIFY_URL=
-OKX_PAYMENT_API_KEY=
-X402_NETWORK=xlayer
-X402_ASSET=OKB
+OKX_API_KEY=
+OKX_SECRET_KEY=
+OKX_PASSPHRASE=
+OKX_BASE_URL=https://web3.okx.com
+OKX_SYNC_SETTLE=true
+X402_NETWORK=eip155:196
+X402_ASSET=0x779ded0c9e1022225f8e0630b35a9b54be713736
+X402_ASSET_SYMBOL=USD₮0
 X402_RECEIVER=0x0b95dF99653f9dA5cBdeaAbeb5B4110dE9D1073a
 ```
 
 `AGENTFUND_WATCHLIST` must be a comma-separated list of real X Layer token addresses before live market scans can return ranked results.
+
+For production x402 settlement, create an OKX Developer Portal API key and set `OKX_API_KEY`, `OKX_SECRET_KEY`, and `OKX_PASSPHRASE`. The receiving wallet is `X402_RECEIVER`. X Layer mainnet must use CAIP-2 network `eip155:196`; supported payment tokens are USD₮0 and USDG.
 
 ## Development
 

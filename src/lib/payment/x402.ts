@@ -1,97 +1,96 @@
 import { NextRequest, NextResponse } from "next/server";
+import type { Network, RouteConfig } from "@okxweb3/x402-next";
 import { env } from "@/lib/env";
-import { ServiceCatalogEntry } from "@/lib/services/catalog";
+import { isServiceId, serviceCatalog } from "@/lib/services/catalog";
 
-type PaymentVerification =
-  | { ok: true; settlement?: unknown }
-  | { ok: false; status: number; message: string; detail?: unknown };
+type PaidHandler = (request: NextRequest) => Promise<NextResponse<unknown>>;
+const x402Network = env.X402_NETWORK as Network;
 
-export function paymentRequiredResponse(service: ServiceCatalogEntry) {
-  return NextResponse.json(
-    {
-      error: "payment_required",
-      message: "This AgentFund A2MCP service requires x402 payment before execution.",
-      x402: {
-        version: "1",
-        network: env.X402_NETWORK,
-        asset: env.X402_ASSET,
-        receiver: env.X402_RECEIVER,
-        amount: service.priceUsd,
-        currency: "USD",
-        service: service.id,
-        description: service.description,
-        paymentHeader: "X-PAYMENT"
-      }
-    },
-    {
-      status: 402,
-      headers: {
-        "X-AgentFund-Service": service.id,
-        "X-Payment-Required": "x402"
-      }
-    }
-  );
+function serviceFromPath(path: string) {
+  const service = path.split("/").filter(Boolean).at(-1);
+  return service && isServiceId(service) ? service : undefined;
 }
 
-export async function verifyPayment(request: NextRequest, service: ServiceCatalogEntry): Promise<PaymentVerification> {
-  const payment = request.headers.get("x-payment");
+function priceForPath(path: string) {
+  const service = serviceFromPath(path);
+  return service ? `$${serviceCatalog[service].priceUsd}` : "$0.10";
+}
 
-  if (env.AGENTFUND_PAYMENT_MODE === "disabled") {
-    if (env.NODE_ENV === "production") {
-      return {
-        ok: false,
-        status: 500,
-        message: "Payment bypass is not allowed in production."
-      };
+export const paymentMetadata = {
+  standard: "x402",
+  scheme: "exact",
+  network: x402Network,
+  asset: env.X402_ASSET,
+  assetSymbol: env.X402_ASSET_SYMBOL,
+  receiver: env.X402_RECEIVER,
+  header: "PAYMENT",
+  responseHeader: "PAYMENT-RESPONSE",
+  maxTimeoutSeconds: 300
+};
+
+export const agentFundRouteConfig: RouteConfig = {
+  accepts: {
+    scheme: paymentMetadata.scheme,
+    network: x402Network,
+    payTo: env.X402_RECEIVER,
+    price: (context) => priceForPath(context.path),
+    maxTimeoutSeconds: paymentMetadata.maxTimeoutSeconds
+  },
+  description: "AgentFund paid strategy intelligence service for OKX.AI agents.",
+  mimeType: "application/json",
+  unpaidResponseBody: (context) => ({
+    contentType: "application/json",
+    body: {
+      error: "payment_required",
+      message: "AgentFund requires an OKX x402 payment before executing this ASP service.",
+      service: serviceFromPath(context.path),
+      payment: {
+        ...paymentMetadata,
+        price: priceForPath(context.path)
+      }
     }
+  }),
+  settlementFailedResponseBody: (_context, settlement) => ({
+    contentType: "application/json",
+    body: {
+      error: "payment_settlement_failed",
+      settlement
+    }
+  })
+};
 
-    return { ok: true, settlement: { mode: "disabled-local-development" } };
-  }
+async function buildWrappedHandler(handler: PaidHandler) {
+  const [{ OKXFacilitatorClient }, { withX402, x402ResourceServer }, { ExactEvmScheme }] = await Promise.all([
+    import("@okxweb3/x402-core"),
+    import("@okxweb3/x402-next"),
+    import("@okxweb3/x402-evm/exact/server")
+  ]);
 
-  if (!payment) {
-    return {
-      ok: false,
-      status: 402,
-      message: "Missing X-PAYMENT header."
-    };
-  }
-
-  if (!env.OKX_PAYMENT_VERIFY_URL) {
-    return {
-      ok: false,
-      status: 503,
-      message: "OKX payment verification endpoint is not configured."
-    };
-  }
-
-  const verification = await fetch(env.OKX_PAYMENT_VERIFY_URL, {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      ...(env.OKX_PAYMENT_API_KEY ? { authorization: `Bearer ${env.OKX_PAYMENT_API_KEY}` } : {})
-    },
-    body: JSON.stringify({
-      payment,
-      network: env.X402_NETWORK,
-      asset: env.X402_ASSET,
-      receiver: env.X402_RECEIVER,
-      amount: service.priceUsd,
-      currency: "USD",
-      resource: new URL(request.url).pathname,
-      serviceId: service.id
-    })
+  const facilitatorClient = new OKXFacilitatorClient({
+    apiKey: env.OKX_API_KEY,
+    secretKey: env.OKX_SECRET_KEY,
+    passphrase: env.OKX_PASSPHRASE,
+    baseUrl: env.OKX_BASE_URL,
+    syncSettle: env.OKX_SYNC_SETTLE
   });
 
-  const detail = await verification.json().catch(() => ({}));
+  const resourceServer = new x402ResourceServer(facilitatorClient).register(x402Network, new ExactEvmScheme());
+  return withX402(handler, agentFundRouteConfig, resourceServer);
+}
 
-  if (!verification.ok) {
-    return {
-      ok: false,
-      status: verification.status,
-      message: "OKX x402 payment verification failed.",
-      detail
-    };
+let wrappedHandler: ((request: NextRequest) => Promise<NextResponse<unknown>>) | undefined;
+
+export function withAgentFundX402(handler: PaidHandler) {
+  if (env.AGENTFUND_PAYMENT_MODE === "disabled") {
+    if (env.NODE_ENV === "production") {
+      throw new Error("AGENTFUND_PAYMENT_MODE=disabled is not allowed in production.");
+    }
+
+    return handler;
   }
 
-  return { ok: true, settlement: detail };
+  return async (request: NextRequest) => {
+    wrappedHandler ??= await buildWrappedHandler(handler);
+    return wrappedHandler(request);
+  };
 }

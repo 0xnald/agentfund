@@ -8,6 +8,15 @@ importers:
 
   .:
     dependencies:
+      '@okxweb3/x402-core':
+        specifier: ^0.1.0
+        version: 0.1.0
+      '@okxweb3/x402-evm':
+        specifier: ^0.2.1
+        version: 0.2.1(typescript@5.9.3)
+      '@okxweb3/x402-next':
+        specifier: ^0.1.1
+        version: 0.1.1(next@15.5.20(react-dom@19.2.7(react@19.2.7))(react@19.2.7))
       '@vercel/analytics':
         specifier: ^1.5.0
         version: 1.6.1(next@15.5.20(react-dom@19.2.7(react@19.2.7))(react@19.2.7))(react@19.2.7)
@@ -539,6 +548,17 @@ packages:
   '@nolyfill/is-core-module@1.0.39':
     resolution: {integrity: sha512-nn5ozdjYQpUCZlWGuxcJY/KpxkWQs4DcbMCmKojjyrYDEAGy4Ce19NN4v5MduafTwJlbKc99UA8YhSVqq9yPZA==}
     engines: {node: '>=12.4.0'}
+
+  '@okxweb3/x402-core@0.1.0':
+    resolution: {integrity: sha512-eXpZ51F3quf6GlDw/zwtBzirSCo9BRhdbWy4ipEoooyXE9VRpi/pRQgevKROyjNCPBAW/zpTZkqoUGfvtpyoTA==}
+
+  '@okxweb3/x402-evm@0.2.1':
+    resolution: {integrity: sha512-wdkMaoQS3dy06vQQB+a6PzBoBb5nIXTZKEYLYzmq+xtRjc+F/QzQ9dBM2+FnI31TDwN/CdI1teaPWwrcy/7LxA==}
+
+  '@okxweb3/x402-next@0.1.1':
+    resolution: {integrity: sha512-JFAi3pBTWf8BkzJMfVFHO41r6yV8rOPYVerE+oOdxy/Le1nEepWcknfVBa9jaOf/wGDVB1h0496qiTjjGeoryg==}
+    peerDependencies:
+      next: ^16.0.10
 
   '@rollup/rollup-android-arm-eabi@4.62.2':
     resolution: {integrity: sha512-6o7ZLZK+BeenkZCFNDXqpbjw9bD6nuWonvS/lwQJp7NoVVxm6p3qE7qQ5jGuBjiFsgvqjD8mZAU5oWxTmbOeOg==}
@@ -2768,6 +2788,26 @@ snapshots:
       fastq: 1.20.1
 
   '@nolyfill/is-core-module@1.0.39': {}
+
+  '@okxweb3/x402-core@0.1.0':
+    dependencies:
+      zod: 3.25.76
+
+  '@okxweb3/x402-evm@0.2.1(typescript@5.9.3)':
+    dependencies:
+      '@okxweb3/x402-core': 0.1.0
+      viem: 2.55.2(typescript@5.9.3)(zod@3.25.76)
+      zod: 3.25.76
+    transitivePeerDependencies:
+      - bufferutil
+      - typescript
+      - utf-8-validate
+
+  '@okxweb3/x402-next@0.1.1(next@15.5.20(react-dom@19.2.7(react@19.2.7))(react@19.2.7))':
+    dependencies:
+      '@okxweb3/x402-core': 0.1.0
+      next: 15.5.20(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
+      zod: 3.25.76
 
   '@rollup/rollup-android-arm-eabi@4.62.2':
     optional: true

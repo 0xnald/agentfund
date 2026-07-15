@@ -119,7 +119,7 @@ export function AgentTerminal({ services: serviceList }: AgentTerminalProps) {
         method: "POST",
         headers: {
           "content-type": "application/json",
-          ...(paymentHeader ? { "x-payment": paymentHeader } : {})
+          ...(paymentHeader ? { payment: paymentHeader } : {})
         },
         body: JSON.stringify(body)
       });
@@ -174,9 +174,9 @@ export function AgentTerminal({ services: serviceList }: AgentTerminalProps) {
           </label>
 
           <label>
-            X-PAYMENT Header
+            PAYMENT Header
             <input
-              placeholder="Paste OKX.AI x402 payment payload"
+              placeholder="Paste OKX.AI x402 PAYMENT payload"
               value={paymentHeader}
               onChange={(event) => setPaymentHeader(event.target.value)}
             />

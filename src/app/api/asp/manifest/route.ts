@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { env } from "@/lib/env";
+import { paymentMetadata } from "@/lib/payment/x402";
 import { serviceCatalog } from "@/lib/services/catalog";
 
 export const dynamic = "force-dynamic";
@@ -15,10 +16,17 @@ export async function GET() {
     homepage: baseUrl,
     catalogUrl: `${baseUrl}/api/asp/catalog`,
     payment: {
-      standard: "x402",
-      network: env.X402_NETWORK,
-      asset: env.X402_ASSET,
-      receiver: env.X402_RECEIVER
+      ...paymentMetadata,
+      supportedTokens: [
+        {
+          symbol: "USD₮0",
+          address: "0x779ded0c9e1022225f8e0630b35a9b54be713736"
+        },
+        {
+          symbol: "USDG",
+          address: "0x4ae46a509f6b1d9056937ba4500cb143933d2dc8"
+        }
+      ]
     },
     chain: {
       id: env.NEXT_PUBLIC_AGENTFUND_CHAIN_ID,

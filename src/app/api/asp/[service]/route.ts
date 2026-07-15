@@ -1,41 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
-import { paymentRequiredResponse, verifyPayment } from "@/lib/payment/x402";
+import { withAgentFundX402 } from "@/lib/payment/x402";
 import { executeService, formatServiceError } from "@/lib/services/executor";
 import { isServiceId, serviceCatalog } from "@/lib/services/catalog";
 
 export const dynamic = "force-dynamic";
 
-type RouteContext = {
-  params: Promise<{
-    service: string;
-  }>;
-};
-
-export async function POST(request: NextRequest, context: RouteContext) {
-  const { service: serviceParam } = await context.params;
+async function handler(request: NextRequest) {
+  const serviceParam = request.nextUrl.pathname.split("/").filter(Boolean).at(-1) ?? "";
 
   if (!isServiceId(serviceParam)) {
     return NextResponse.json({ error: "unknown_service", service: serviceParam }, { status: 404 });
   }
 
   const service = serviceCatalog[serviceParam];
-  const payment = await verifyPayment(request, service);
-
-  if (!payment.ok) {
-    if (payment.status === 402) {
-      return paymentRequiredResponse(service);
-    }
-
-    return NextResponse.json(
-      {
-        error: "payment_verification_failed",
-        message: payment.message,
-        detail: payment.detail
-      },
-      { status: payment.status }
-    );
-  }
-
   const input = await request.json().catch(() => ({}));
 
   try {
@@ -43,9 +20,15 @@ export async function POST(request: NextRequest, context: RouteContext) {
 
     return NextResponse.json({
       ...result,
-      settlement: payment.settlement
+      billing: {
+        mode: "okx_x402",
+        service: service.id,
+        priceUsd: service.priceUsd
+      }
     });
   } catch (error) {
     return NextResponse.json(formatServiceError(error), { status: 400 });
   }
 }
+
+export const POST = withAgentFundX402(handler);

@@ -37,7 +37,7 @@ AgentFund gives OKX.AI a real revenue-generating finance ASP. Each strategy agen
 
 1. Open the AgentFund terminal.
 2. Show the ASP catalog.
-3. Call a paid service with an `X-PAYMENT` header.
+3. Call a paid service; unpaid requests return HTTP 402, then Agentic Wallet retries with the `PAYMENT` header.
 4. Generate a market scan or token score from live X Layer data.
 5. Generate a trade signal that explicitly remains user-approved.
 6. Generate an X post for the strategy agent.
@@ -48,8 +48,9 @@ AgentFund gives OKX.AI a real revenue-generating finance ASP. Each strategy agen
 - X Layer mainnet RPC in `XLAYER_RPC_URL`
 - Real X Layer watchlist token addresses in `AGENTFUND_WATCHLIST`
 - 0G router key in `LLM_API_KEY`
-- OKX Payment SDK verification endpoint in `OKX_PAYMENT_VERIFY_URL`
-- OKX payment credentials in `OKX_PAYMENT_API_KEY`
+- OKX Developer Portal credentials in `OKX_API_KEY`, `OKX_SECRET_KEY`, and `OKX_PASSPHRASE`
+- x402 network set to `eip155:196`
+- payment token set to X Layer USD₮0, `0x779ded0c9e1022225f8e0630b35a9b54be713736`, or USDG if configured
 
 ## Submission Tags
 
