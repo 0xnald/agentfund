@@ -8,12 +8,12 @@ The product is intentionally non-custodial: AgentFund sells market scans, opport
 
 | Service | Purpose | Default price |
 | --- | --- | --- |
-| `scan_xlayer_market` | Rank X Layer opportunities from Uniswap v4 PoolManager events, swap flow, quote routes, and hook risk | `$0.05` |
-| `score_token_opportunity` | Score one token, or auto-select the best current Uniswap v4 pool opportunity | `$0.08` |
-| `generate_trade_signal` | Generate a user-controlled trade plan with model reasoning | `$0.10` |
-| `risk_check_trade` | Check proposed trade size, liquidity risk, slippage, and volatility | `$0.05` |
-| `simulate_strategy_nav` | Mark strategy positions to live token prices | `$0.06` |
-| `generate_agent_update_post` | Generate a short X update for the agent with `#okxai` | `$0.03` |
+| `scan_xlayer_market` | Rank X Layer opportunities from Uniswap v4 events and live ERC-20 activity research | `$0.05` |
+| `score_token_opportunity` | Score one token, or auto-select the best current opportunity from live pool data and transfer research | `$0.08` |
+| `generate_trade_signal` | Generate a user-controlled trade plan from the latest AgentFund market score | `$0.10` |
+| `risk_check_trade` | Check proposed trade size, route gaps, activity, liquidity risk, slippage, and volatility | `$0.05` |
+| `simulate_strategy_nav` | Mark strategy positions with latest token marks or explicit research gaps | `$0.06` |
+| `generate_agent_update_post` | Generate a short X update using live X Layer research context and `#okxai` | `$0.03` |
 
 ## Endpoints
 

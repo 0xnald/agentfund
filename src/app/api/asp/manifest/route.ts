@@ -12,7 +12,8 @@ export async function GET() {
     name: "AgentFund",
     version: "0.1.0",
     aspType: "A2MCP",
-    description: "Paid strategy intelligence for autonomous finance agents on X Layer.",
+    description:
+      "Paid X Layer strategy intelligence for autonomous finance agents, powered by Uniswap v4 events and live ERC-20 activity research.",
     homepage: baseUrl,
     catalogUrl: `${baseUrl}/api/asp/catalog`,
     payment: {

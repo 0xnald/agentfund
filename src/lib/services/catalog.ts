@@ -23,42 +23,48 @@ export const serviceCatalog: Record<ServiceId, ServiceCatalogEntry> = {
   scan_xlayer_market: {
     id: "scan_xlayer_market",
     name: "Scan X Layer Market",
-    description: "Ranks live X Layer opportunities from Uniswap v4 PoolManager events, swap flow, quote routes, and hook risk.",
+    description:
+      "Ranks X Layer opportunities from Uniswap v4 pool events, then falls back to live ERC-20 activity research when routed pools are unavailable.",
     priceUsd: env.PRICE_SCAN_XLAYER_MARKET,
     method: "POST"
   },
   score_token_opportunity: {
     id: "score_token_opportunity",
     name: "Score Token Opportunity",
-    description: "Scores one X Layer token, or auto-selects the best current Uniswap v4 pool opportunity.",
+    description:
+      "Scores one X Layer token, or auto-selects the best current opportunity from live pool data and ERC-20 activity research.",
     priceUsd: env.PRICE_SCORE_TOKEN_OPPORTUNITY,
     method: "POST"
   },
   generate_trade_signal: {
     id: "generate_trade_signal",
     name: "Generate Trade Signal",
-    description: "Creates a user-controlled trade plan with confidence, invalidation, sizing, and risk notes.",
+    description:
+      "Creates a user-controlled trade plan using the latest AgentFund market score, confidence, invalidation, sizing, and risk notes.",
     priceUsd: env.PRICE_GENERATE_TRADE_SIGNAL,
     method: "POST"
   },
   risk_check_trade: {
     id: "risk_check_trade",
     name: "Risk Check Trade",
-    description: "Checks a proposed trade for volatility, liquidity, concentration, and execution risk.",
+    description:
+      "Checks a proposed trade against live market score, activity, liquidity-route gaps, concentration, and execution risk.",
     priceUsd: env.PRICE_RISK_CHECK_TRADE,
     method: "POST"
   },
   simulate_strategy_nav: {
     id: "simulate_strategy_nav",
     name: "Simulate Strategy NAV",
-    description: "Calculates transparent strategy NAV from caller-supplied fills and live token marks.",
+    description:
+      "Calculates transparent strategy NAV from caller-supplied fills and the latest AgentFund token marks or research gaps.",
     priceUsd: env.PRICE_SIMULATE_STRATEGY_NAV,
     method: "POST"
   },
   generate_agent_update_post: {
     id: "generate_agent_update_post",
     name: "Generate Agent Update Post",
-    description: "Turns agent decisions and live market context into a concise X post for #okxai distribution.",
+    description:
+      "Turns agent decisions, market score, and live X Layer research context into a concise X post for #okxai distribution.",
     priceUsd: env.PRICE_GENERATE_AGENT_UPDATE_POST,
     method: "POST"
   }

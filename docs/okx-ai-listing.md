@@ -10,11 +10,11 @@ A2MCP
 
 ## Short Description
 
-Paid strategy intelligence for autonomous finance agents on X Layer.
+Paid X Layer strategy intelligence for autonomous finance agents.
 
 ## Full Description
 
-AgentFund lets OKX.AI agents call fixed-price services for X Layer market scans, token opportunity scoring, user-controlled trade signals, risk checks, NAV simulation, and public strategy updates.
+AgentFund lets OKX.AI agents call fixed-price services for X Layer market scans, token opportunity scoring, user-controlled trade signals, risk checks, NAV simulation, and public strategy updates. It reads Uniswap v4 pool events first, then falls back to live ERC-20 transfer activity research when routed pools are unavailable.
 
 AgentFund does not custody user funds and does not pool capital. It provides intelligence and execution plans that users or calling agents can review before acting.
 
@@ -26,12 +26,12 @@ AgentFund gives OKX.AI a real revenue-generating finance ASP. Each strategy agen
 
 | Service | Price | Description |
 | --- | --- | --- |
-| `scan_xlayer_market` | `$0.05` | Reads Uniswap v4 X Layer PoolManager events and ranks pools by swap flow, quote route, liquidity, fee tier, and hook risk. |
-| `score_token_opportunity` | `$0.08` | Scores one token, or auto-selects the best current Uniswap v4 pool opportunity, using on-chain pool data. |
-| `generate_trade_signal` | `$0.10` | Generates a trade thesis, confidence score, invalidation, sizing note, and risk summary. |
-| `risk_check_trade` | `$0.05` | Checks trade size, visible liquidity, slippage settings, and volatility risk before user approval. |
-| `simulate_strategy_nav` | `$0.06` | Marks a caller-supplied strategy portfolio using live X Layer token prices. |
-| `generate_agent_update_post` | `$0.03` | Generates concise X-ready strategy updates with `#okxai`. |
+| `scan_xlayer_market` | `$0.05` | Ranks X Layer opportunities from Uniswap v4 events and live ERC-20 transfer activity research. |
+| `score_token_opportunity` | `$0.08` | Scores one token, or auto-selects the best current opportunity from live pool data and transfer research. |
+| `generate_trade_signal` | `$0.10` | Generates a user-controlled trade thesis, confidence score, invalidation, sizing note, and risk summary. |
+| `risk_check_trade` | `$0.05` | Checks trade size, route gaps, activity, liquidity risk, slippage settings, and volatility risk before user approval. |
+| `simulate_strategy_nav` | `$0.06` | Marks a caller-supplied strategy portfolio using latest token marks or explicit research gaps. |
+| `generate_agent_update_post` | `$0.03` | Generates concise X-ready strategy updates from live X Layer research context with `#okxai`. |
 
 ## Demo Flow
 
@@ -46,7 +46,7 @@ AgentFund gives OKX.AI a real revenue-generating finance ASP. Each strategy agen
 
 - Vercel deployment URL in `NEXT_PUBLIC_SITE_URL`
 - X Layer mainnet RPC in `XLAYER_RPC_URL`
-- Uniswap v4 X Layer contract configuration: PoolManager, StateView, Quoter, Universal Router, and quote token list
+- Uniswap v4 X Layer contract configuration: PoolManager, StateView, Quoter, Universal Router, quote token list, and `AGENTFUND_WATCHLIST`
 - 0G router key in `LLM_API_KEY`
 - OKX Developer Portal credentials in `OKX_API_KEY`, `OKX_SECRET_KEY`, and `OKX_PASSPHRASE`
 - x402 network set to `eip155:196`
