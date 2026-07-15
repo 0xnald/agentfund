@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { paymentRequiredResponse, verifyPayment } from "@/lib/payment/x402";
+import { executeService, formatServiceError } from "@/lib/services/executor";
 import { isServiceId, serviceCatalog } from "@/lib/services/catalog";
 
 export const dynamic = "force-dynamic";
@@ -35,12 +36,16 @@ export async function POST(request: NextRequest, context: RouteContext) {
     );
   }
 
-  return NextResponse.json(
-    {
-      error: "service_not_implemented",
-      message: `${service.id} is registered in the ASP catalog. The service executor will be added in the next build commit.`,
+  const input = await request.json().catch(() => ({}));
+
+  try {
+    const result = await executeService(serviceParam, input);
+
+    return NextResponse.json({
+      ...result,
       settlement: payment.settlement
-    },
-    { status: 501 }
-  );
+    });
+  } catch (error) {
+    return NextResponse.json(formatServiceError(error), { status: 400 });
+  }
 }
