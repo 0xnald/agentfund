@@ -10,71 +10,81 @@ type CallState =
   | { status: "success"; code: number; body: unknown }
   | { status: "error"; code: number; body: unknown };
 
-const payloadTemplates: Record<string, string> = {
-  scan_xlayer_market: JSON.stringify(
-    {
+const defaultTokenAddress = "0x779ded0c9e1022225f8e0630b35a9b54be713736";
+
+function payloadTemplate(serviceId: string, tokenAddress = defaultTokenAddress) {
+  const templates: Record<string, unknown> = {
+    scan_xlayer_market: {
       strategy: "Find the strongest X Layer momentum opportunity from live market data",
       maxTokens: 10
     },
-    null,
-    2
-  ),
-  score_token_opportunity: JSON.stringify(
-    {
-      tokenAddress: "0x...",
+    score_token_opportunity: {
+      tokenAddress,
       strategy: "Momentum with liquidity safety"
     },
-    null,
-    2
-  ),
-  generate_trade_signal: JSON.stringify(
-    {
-      tokenAddress: "0x...",
+    generate_trade_signal: {
+      tokenAddress,
       agentName: "X-Alpha",
       strategy: "Momentum and liquidity rotation",
       riskProfile: "balanced",
       accountSizeUsd: 1000
     },
-    null,
-    2
-  ),
-  risk_check_trade: JSON.stringify(
-    {
-      tokenAddress: "0x...",
+    risk_check_trade: {
+      tokenAddress,
       side: "buy",
       notionalUsd: 250,
       maxSlippageBps: 100
     },
-    null,
-    2
-  ),
-  simulate_strategy_nav: JSON.stringify(
-    {
+    simulate_strategy_nav: {
       startingNavUsd: 1000,
       cashUsd: 250,
       positions: [
         {
-          tokenAddress: "0x...",
+          tokenAddress,
           units: 10,
           costBasisUsd: 500
         }
       ]
     },
-    null,
-    2
-  ),
-  generate_agent_update_post: JSON.stringify(
-    {
+    generate_agent_update_post: {
       agentName: "X-Alpha",
-      tokenAddress: "0x...",
+      tokenAddress,
       decision: "watch",
       reason: "Liquidity is improving, but volatility is elevated.",
       includeHashtag: true
-    },
-    null,
-    2
-  )
-};
+    }
+  };
+
+  return JSON.stringify(templates[serviceId], null, 2);
+}
+
+function extractTokenAddress(value: unknown): string | undefined {
+  if (!value || typeof value !== "object") {
+    return undefined;
+  }
+
+  if ("tokenAddress" in value && typeof value.tokenAddress === "string" && /^0x[a-fA-F0-9]{40}$/.test(value.tokenAddress)) {
+    return value.tokenAddress;
+  }
+
+  if ("data" in value) {
+    const token = extractTokenAddress(value.data);
+    if (token) {
+      return token;
+    }
+  }
+
+  if ("ranked" in value && Array.isArray(value.ranked)) {
+    for (const item of value.ranked) {
+      const token = extractTokenAddress(item);
+      if (token) {
+        return token;
+      }
+    }
+  }
+
+  return undefined;
+}
 
 type AgentTerminalProps = {
   services: ServiceCatalogEntry[];
@@ -83,14 +93,15 @@ type AgentTerminalProps = {
 export function AgentTerminal({ services: serviceList }: AgentTerminalProps) {
   const services = useMemo(() => serviceList, [serviceList]);
   const [selectedService, setSelectedService] = useState<ServiceCatalogEntry>(services[0]);
-  const [payload, setPayload] = useState(payloadTemplates[services[0].id]);
+  const [discoveredTokenAddress, setDiscoveredTokenAddress] = useState(defaultTokenAddress);
+  const [payload, setPayload] = useState(payloadTemplate(services[0].id, defaultTokenAddress));
   const [paymentHeader, setPaymentHeader] = useState("");
   const [callState, setCallState] = useState<CallState>({ status: "idle" });
 
   function selectService(serviceId: string) {
     const nextService = services.find((service) => service.id === serviceId) ?? services[0];
     setSelectedService(nextService);
-    setPayload(payloadTemplates[nextService.id]);
+    setPayload(payloadTemplate(nextService.id, discoveredTokenAddress));
     setCallState({ status: "idle" });
   }
 
@@ -125,6 +136,11 @@ export function AgentTerminal({ services: serviceList }: AgentTerminalProps) {
       });
 
       const responseBody = await response.json().catch(() => ({}));
+      const nextTokenAddress = extractTokenAddress(responseBody);
+
+      if (nextTokenAddress) {
+        setDiscoveredTokenAddress(nextTokenAddress);
+      }
 
       setCallState({
         status: response.ok ? "success" : "error",
@@ -189,7 +205,7 @@ export function AgentTerminal({ services: serviceList }: AgentTerminalProps) {
               <Play aria-hidden />
               {callState.status === "loading" ? "Calling" : "Call Service"}
             </button>
-            <button type="button" onClick={() => setPayload(payloadTemplates[selectedService.id])}>
+            <button type="button" onClick={() => setPayload(payloadTemplate(selectedService.id, discoveredTokenAddress))}>
               <RotateCcw aria-hidden />
               Reset Payload
             </button>
