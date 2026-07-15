@@ -1,8 +1,7 @@
 import { z } from "zod";
 import { callStrategyModel } from "@/lib/agent/llm";
 import { confidenceFromScore } from "@/lib/agent/scoring";
-import { researchCandidates } from "@/lib/market/research";
-import { discoverUniswapV4Opportunities } from "@/lib/market/uniswapV4";
+import { getMarketOpportunity, getMarketSnapshot, MarketOpportunity } from "@/lib/market/snapshot";
 import { env } from "@/lib/env";
 import { getChainSnapshot, parseAddress } from "@/lib/xlayer/client";
 import { ServiceId } from "@/lib/services/catalog";
@@ -29,40 +28,62 @@ function parseRequestedAddress(tokenAddress: string | undefined, fieldName: stri
   return parseAddress(tokenAddress, fieldName);
 }
 
-async function marketFacts(tokenAddress?: `0x${string}`) {
-  const opportunities = await discoverUniswapV4Opportunities(tokenAddress ? 50 : 1);
-  const opportunity = tokenAddress
-    ? opportunities.find((item) => item.tokenAddress.toLowerCase() === tokenAddress.toLowerCase())
-    : opportunities[0];
+function opportunityConfidence(opportunity: MarketOpportunity) {
+  if ("research" in opportunity) {
+    return opportunity.research.confidence;
+  }
 
-  if (!opportunity) {
-    throw new Error("No Uniswap v4 pool opportunity found in the configured scan window.");
+  return confidenceFromScore(opportunity.score.score);
+}
+
+function opportunityReason(opportunity: MarketOpportunity) {
+  if ("swapCount" in opportunity.activity) {
+    return `${opportunity.activity.swapCount} recent Uniswap v4 swap(s) observed`;
+  }
+
+  return `${opportunity.activity.transferCount} recent transfer(s), ${opportunity.activity.uniqueWallets} unique wallet(s) observed`;
+}
+
+function opportunityDataGaps(opportunity: MarketOpportunity) {
+  const gaps = [...opportunity.score.riskFlags];
+
+  if (!("pool" in opportunity)) {
+    gaps.push("No quote-routed Uniswap v4 pool was found in the configured scan window.");
+    gaps.push("Price, depth, and slippage remain unavailable until a routed pool is discovered.");
+  }
+
+  return [...new Set(gaps)];
+}
+
+function opportunityIntelligence(opportunity: MarketOpportunity) {
+  return {
+    confidence: opportunityConfidence(opportunity),
+    whySelected: [
+      `AgentFund score: ${opportunity.score.score}/100 (${opportunity.score.grade}).`,
+      opportunityReason(opportunity),
+      ...opportunity.score.factors
+    ],
+    dataGaps: opportunityDataGaps(opportunity)
+  };
+}
+
+function normalizeMarketFacts(opportunity: MarketOpportunity) {
+  if ("pool" in opportunity) {
+    return {
+      ...opportunity,
+      intelligence: opportunityIntelligence(opportunity),
+      source: "uniswap_v4_xlayer" as const
+    };
   }
 
   return {
     ...opportunity,
-    source: "uniswap_v4_xlayer"
-  };
-}
-
-function recentSwapCount(facts: Awaited<ReturnType<typeof marketFacts>> | Awaited<ReturnType<typeof researchMarketFacts>>) {
-  return "swapCount" in facts.activity ? facts.activity.swapCount : 0;
-}
-
-async function researchMarketFacts(tokenAddress?: `0x${string}`) {
-  const [candidate] = await researchCandidates(1, tokenAddress);
-
-  if (!candidate) {
-    throw new Error("No Uniswap v4 pool opportunity found and no research candidates are configured.");
-  }
-
-  return {
-    ...candidate,
+    intelligence: opportunityIntelligence(opportunity),
     poolId: "0x0000000000000000000000000000000000000000000000000000000000000000" as `0x${string}`,
     pool: {
       poolManager: env.UNISWAP_V4_POOL_MANAGER_ADDRESS as `0x${string}`,
-      currency0: candidate.tokenAddress,
-      currency1: candidate.tokenAddress,
+      currency0: opportunity.tokenAddress,
+      currency1: opportunity.tokenAddress,
       fee: 0,
       tickSpacing: 0,
       hooks: "0x0000000000000000000000000000000000000000" as `0x${string}`,
@@ -77,33 +98,21 @@ async function researchMarketFacts(tokenAddress?: `0x${string}`) {
   };
 }
 
+async function marketFacts(tokenAddress?: `0x${string}`) {
+  return normalizeMarketFacts(await getMarketOpportunity(tokenAddress));
+}
+
+function recentSwapCount(facts: ReturnType<typeof normalizeMarketFacts>) {
+  return "swapCount" in facts.activity ? facts.activity.swapCount : 0;
+}
+
 async function scanXLayerMarket(input: unknown) {
   const request = scanMarketSchema.parse(input);
-  const chain = await getChainSnapshot();
-  const ranked = await discoverUniswapV4Opportunities(request.maxTokens);
-  const fallbackRanked =
-    ranked.length > 0
-      ? ranked
-      : await researchCandidates(request.maxTokens);
+  const snapshot = await getMarketSnapshot({ maxTokens: request.maxTokens });
 
   return {
     strategy: request.strategy,
-    chain,
-    discovery: {
-      mode: "uniswap_v4_xlayer_onchain_scan",
-      poolManager: env.UNISWAP_V4_POOL_MANAGER_ADDRESS,
-      stateView: env.UNISWAP_V4_STATE_VIEW_ADDRESS,
-      quoter: env.UNISWAP_V4_QUOTER_ADDRESS,
-      universalRouter: env.UNISWAP_UNIVERSAL_ROUTER_ADDRESS,
-      poolDiscoveryBlocks: env.UNISWAP_V4_POOL_DISCOVERY_BLOCKS,
-      swapScanBlocks: env.UNISWAP_V4_SWAP_SCAN_BLOCKS,
-      logChunkBlocks: env.UNISWAP_V4_LOG_CHUNK_BLOCKS,
-      status: ranked.length > 0 ? "live" : "research_fallback_transfer_activity",
-      quoteTokenAddresses: env.UNISWAP_V4_QUOTE_TOKEN_ADDRESSES.split(",").map((item) => item.trim()).filter(Boolean),
-      ranking: "Uniswap v4 initialized pools, recent swap flow, pool liquidity, quote route, fee tier, and hook risk"
-    },
-    ranked: fallbackRanked,
-    generatedAt: new Date().toISOString()
+    ...snapshot
   };
 }
 
@@ -112,7 +121,7 @@ async function scoreTokenOpportunity(input: unknown) {
   const tokenAddress = parseRequestedAddress(request.tokenAddress, "tokenAddress");
   const [chain, facts] = await Promise.all([
     getChainSnapshot(),
-    marketFacts(tokenAddress).catch(() => researchMarketFacts(tokenAddress))
+    marketFacts(tokenAddress)
   ]);
 
   return {
@@ -126,7 +135,7 @@ async function scoreTokenOpportunity(input: unknown) {
 async function generateTradeSignal(input: unknown) {
   const request = generateTradeSignalSchema.parse(input);
   const tokenAddress = parseRequestedAddress(request.tokenAddress, "tokenAddress");
-  const facts = await marketFacts(tokenAddress).catch(() => researchMarketFacts(tokenAddress));
+  const facts = await marketFacts(tokenAddress);
   const confidence = confidenceFromScore(facts.score.score);
 
   const narrative = await callStrategyModel([
@@ -162,7 +171,7 @@ async function generateTradeSignal(input: unknown) {
 async function riskCheckTrade(input: unknown) {
   const request = riskCheckTradeSchema.parse(input);
   const tokenAddress = parseRequestedAddress(request.tokenAddress, "tokenAddress");
-  const facts = await marketFacts(tokenAddress).catch(() => researchMarketFacts(tokenAddress));
+  const facts = await marketFacts(tokenAddress);
   const flags = [...facts.score.riskFlags];
 
   const swapCount = recentSwapCount(facts);
@@ -200,7 +209,7 @@ async function simulateStrategyNav(input: unknown) {
   const positions = await Promise.all(
     request.positions.map(async (position) => {
       const tokenAddress = parseRequestedAddress(position.tokenAddress, "position tokenAddress");
-      const facts = await marketFacts(tokenAddress).catch(() => researchMarketFacts(tokenAddress));
+      const facts = await marketFacts(tokenAddress);
       const priceUsd = facts.priceUsd;
       const markValueUsd = priceUsd * position.units;
 
@@ -234,7 +243,7 @@ async function generateAgentUpdatePost(input: unknown) {
   const request = generatePostSchema.parse(input);
   const tokenAddress = parseRequestedAddress(request.tokenAddress, "tokenAddress");
   const facts = request.tokenAddress
-    ? await marketFacts(tokenAddress).catch(() => researchMarketFacts(tokenAddress))
+    ? await marketFacts(tokenAddress)
     : undefined;
 
   const post = await callStrategyModel([

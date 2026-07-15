@@ -21,6 +21,8 @@ The product is intentionally non-custodial: AgentFund sells market scans, opport
 GET  /api/health
 GET  /api/asp/catalog
 GET  /api/asp/manifest
+GET  /api/market/snapshot
+GET  /api/market/refresh
 POST /api/asp/:service
 ```
 
@@ -47,6 +49,12 @@ UNISWAP_V4_SWAP_SCAN_BLOCKS=1000
 UNISWAP_V4_LOG_CHUNK_BLOCKS=100
 UNISWAP_V4_LOG_CONCURRENCY=2
 UNISWAP_V4_QUOTE_TOKEN_ADDRESSES=0x779ded0c9e1022225f8e0630b35a9b54be713736,0x4ae46a509f6b1d9056937ba4500cb143933d2dc8
+RESEARCH_TRANSFER_SCAN_BLOCKS=1000
+RESEARCH_LOG_CHUNK_BLOCKS=100
+RESEARCH_LOG_CONCURRENCY=2
+AGENTFUND_MARKET_CACHE_TTL_MS=60000
+AGENTFUND_MARKET_CACHE_STALE_MS=300000
+AGENTFUND_MARKET_CACHE_MAX_TOKENS=10
 LLM_API_KEY=
 LLM_BASE_URL=https://router-api.0g.ai/v1
 LLM_MODEL=deepseek-v4-flash
@@ -64,7 +72,7 @@ X402_ASSET_SYMBOL=USD₮0
 X402_RECEIVER=0x0b95dF99653f9dA5cBdeaAbeb5B4110dE9D1073a
 ```
 
-`scan_xlayer_market` reads Uniswap v4 `Initialize` and `Swap` events directly from the X Layer PoolManager, derives pool price from `sqrtPriceX96`, checks quote routes against configured stable assets, and flags custom hook risk. Services that accept `tokenAddress` also accept `"auto"` to use the current top-ranked on-chain opportunity.
+`scan_xlayer_market` reads Uniswap v4 `Initialize` and `Swap` events directly from the X Layer PoolManager, derives pool price from `sqrtPriceX96`, checks quote routes against configured assets, and flags custom hook risk. If no routed pool is available in the scan window, AgentFund falls back to real X Layer ERC-20 transfer research across `AGENTFUND_WATCHLIST`. Services that accept `tokenAddress` also accept `"auto"` to use the current top-ranked opportunity from the cached market snapshot. Warm the cache before a demo or deploy smoke test with `GET /api/market/refresh`.
 
 For production x402 settlement, create an OKX Developer Portal API key and set `OKX_API_KEY`, `OKX_SECRET_KEY`, and `OKX_PASSPHRASE`. The receiving wallet is `X402_RECEIVER`. X Layer mainnet must use CAIP-2 network `eip155:196`; supported payment tokens are USD₮0 and USDG.
 
