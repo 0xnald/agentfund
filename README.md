@@ -8,8 +8,8 @@ The product is intentionally non-custodial: AgentFund sells market scans, opport
 
 | Service | Purpose | Default price |
 | --- | --- | --- |
-| `scan_xlayer_market` | Rank configured X Layer watchlist tokens using live chain and DEX data | `$0.05` |
-| `score_token_opportunity` | Score one token using liquidity, turnover, momentum, and risk flags | `$0.08` |
+| `scan_xlayer_market` | Rank X Layer opportunities from OKX DEX Aggregator token discovery and executable route quotes | `$0.05` |
+| `score_token_opportunity` | Score one token, or auto-select the best current route, using OKX quote quality and risk flags | `$0.08` |
 | `generate_trade_signal` | Generate a user-controlled trade plan with model reasoning | `$0.10` |
 | `risk_check_trade` | Check proposed trade size, liquidity risk, slippage, and volatility | `$0.05` |
 | `simulate_strategy_nav` | Mark strategy positions to live token prices | `$0.06` |
@@ -39,6 +39,16 @@ XLAYER_RPC_URL=https://rpc.xlayer.tech
 DEXSCREENER_CHAIN_ID=xlayer
 AGENTFUND_DISCOVERY_QUERIES=xlayer,okx,okb
 AGENTFUND_WATCHLIST=
+OKX_DEX_API_BASE_URL=https://web3.okx.com
+OKX_DEX_CHAIN_INDEX=196
+OKX_DEX_PROJECT_ID=
+NEXT_PUBLIC_OKX_PROJECT_ID=
+OKX_DEX_QUOTE_TOKEN_ADDRESS=0x779ded0c9e1022225f8e0630b35a9b54be713736
+OKX_DEX_TOKENS_PATH=/api/v6/dex/aggregator/all-tokens
+OKX_DEX_QUOTE_PATH=/api/v6/dex/aggregator/quote
+OKX_DEX_SWAP_PATH=/api/v6/dex/aggregator/swap
+OKX_DEX_CHAIN_DATA_PATH=/api/v6/dex/aggregator/get-chain-data
+OKX_DEX_TIMEOUT_MS=15000
 LLM_API_KEY=
 LLM_BASE_URL=https://router-api.0g.ai/v1
 LLM_MODEL=deepseek-v4-flash
@@ -47,6 +57,7 @@ AGENTFUND_PAYMENT_MODE=production
 OKX_API_KEY=
 OKX_SECRET_KEY=
 OKX_PASSPHRASE=
+OKX_API_PASSPHRASE=
 OKX_BASE_URL=https://web3.okx.com
 OKX_SYNC_SETTLE=true
 X402_NETWORK=eip155:196
@@ -55,7 +66,7 @@ X402_ASSET_SYMBOL=USD₮0
 X402_RECEIVER=0x0b95dF99653f9dA5cBdeaAbeb5B4110dE9D1073a
 ```
 
-`scan_xlayer_market` discovers live candidates from DexScreener token profiles, boosted tokens, and configured search queries, then ranks the best X Layer opportunities. `AGENTFUND_WATCHLIST` is optional and only forces known token contract addresses into the scan.
+`scan_xlayer_market` discovers X Layer candidates from OKX DEX Aggregator `all-tokens`, requests executable OKX route quotes, and ranks the best opportunities by route availability, route diversity, USD mark context, and price impact. Services that accept `tokenAddress` also accept `"auto"` to use the current top-ranked OKX route.
 
 For production x402 settlement, create an OKX Developer Portal API key and set `OKX_API_KEY`, `OKX_SECRET_KEY`, and `OKX_PASSPHRASE`. The receiving wallet is `X402_RECEIVER`. X Layer mainnet must use CAIP-2 network `eip155:196`; supported payment tokens are USD₮0 and USDG.
 

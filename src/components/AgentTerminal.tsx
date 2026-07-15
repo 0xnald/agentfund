@@ -10,7 +10,7 @@ type CallState =
   | { status: "success"; code: number; body: unknown }
   | { status: "error"; code: number; body: unknown };
 
-const defaultTokenAddress = "0x779ded0c9e1022225f8e0630b35a9b54be713736";
+const defaultTokenAddress = "auto";
 
 function payloadTemplate(serviceId: string, tokenAddress = defaultTokenAddress) {
   const templates: Record<string, unknown> = {

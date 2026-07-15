@@ -1,15 +1,15 @@
 import { z } from "zod";
 import { callStrategyModel } from "@/lib/agent/llm";
-import { confidenceFromScore, scorePair } from "@/lib/agent/scoring";
+import { confidenceFromScore } from "@/lib/agent/scoring";
 import {
-  discoveryQueries,
-  fetchLatestTokenBoosts,
-  fetchLatestTokenProfiles,
-  fetchTokenPairs,
-  pickPrimaryPair,
-  searchPairs
-} from "@/lib/market/dexscreener";
-import { getChainSnapshot, getWatchlist, parseAddress } from "@/lib/xlayer/client";
+  discoverOkxDexOpportunities,
+  fetchOkxDexQuote,
+  fetchOkxDexTokens,
+  OkxOpportunity,
+  scoreOkxQuote
+} from "@/lib/market/okxDex";
+import { env } from "@/lib/env";
+import { getChainSnapshot, parseAddress } from "@/lib/xlayer/client";
 import { ServiceId } from "@/lib/services/catalog";
 import {
   generatePostSchema,
@@ -26,81 +26,111 @@ export type ServiceExecutionResult = {
   data: unknown;
 };
 
-async function marketFacts(tokenAddress: `0x${string}`) {
-  const pairs = await fetchTokenPairs(tokenAddress);
-  const primaryPair = pickPrimaryPair(pairs);
+const QUOTE_TOKEN_DECIMALS = 6;
 
-  if (!primaryPair) {
-    throw new Error(`No live DEX pairs found for token ${tokenAddress} on X Layer.`);
+function parseRequestedAddress(tokenAddress: string | undefined, fieldName: string) {
+  if (!tokenAddress || tokenAddress.toLowerCase() === "auto") {
+    return undefined;
   }
 
-  const score = scorePair(primaryPair);
+  return parseAddress(tokenAddress, fieldName);
+}
+
+function decimalAmount(rawAmount: string | undefined, decimals: number) {
+  const value = Number(rawAmount ?? 0);
+
+  if (!Number.isFinite(value) || value <= 0) {
+    return 0;
+  }
+
+  return value / 10 ** decimals;
+}
+
+function markPriceUsd(opportunity: Pick<OkxOpportunity, "quote" | "decimals">) {
+  if (opportunity.quote.estimatedPriceUsd && opportunity.quote.estimatedPriceUsd > 0) {
+    return opportunity.quote.estimatedPriceUsd;
+  }
+
+  const toStable = decimalAmount(opportunity.quote.toTokenAmount, QUOTE_TOKEN_DECIMALS);
+  const fromToken = decimalAmount(opportunity.quote.fromTokenAmount, opportunity.decimals);
+  return fromToken > 0 ? toStable / fromToken : 0;
+}
+
+async function opportunityFromAddress(tokenAddress: `0x${string}`) {
+  const tokens = await fetchOkxDexTokens();
+  const token = tokens.find((candidate) => candidate.tokenContractAddress?.toLowerCase() === tokenAddress.toLowerCase());
+
+  if (!token) {
+    throw new Error(`Token ${tokenAddress} was not returned by OKX DEX Aggregator all-tokens for X Layer.`);
+  }
+
+  const decimals = Number(token.decimals ?? 18);
+  const quote = await fetchOkxDexQuote({
+    fromTokenAddress: tokenAddress,
+    amount: (10n ** BigInt(Math.max(0, decimals))).toString()
+  });
 
   return {
     tokenAddress,
-    pairCount: pairs.length,
-    primaryPair,
-    score
+    symbol: token.tokenSymbol ?? "UNKNOWN",
+    name: token.tokenName ?? token.tokenSymbol ?? "Unknown token",
+    decimals,
+    quote,
+    score: scoreOkxQuote(quote)
+  };
+}
+
+async function marketFacts(tokenAddress?: `0x${string}`) {
+  const opportunity = tokenAddress
+    ? await opportunityFromAddress(tokenAddress)
+    : (await discoverOkxDexOpportunities(1))[0];
+
+  if (!opportunity) {
+    throw new Error(
+      "OKX DEX Aggregator returned no executable X Layer opportunities. Check OKX API credentials/project ID and token routing availability."
+    );
+  }
+
+  const priceUsd = markPriceUsd(opportunity);
+
+  return {
+    ...opportunity,
+    priceUsd,
+    source: "okx_dex_aggregator",
+    quoteTokenAddress: env.OKX_DEX_QUOTE_TOKEN_ADDRESS,
+    routeCount: opportunity.quote.dexRouterList?.length ?? 0,
+    quoteRouteCount: opportunity.quote.quoteCompareList?.length ?? 0,
+    priceImpactPercentage: Number(opportunity.quote.priceImpactPercentage ?? 0)
   };
 }
 
 async function scanXLayerMarket(input: unknown) {
   const request = scanMarketSchema.parse(input);
-
-  const forcedWatchlist = getWatchlist();
-  const [profiles, boosts, searchResults] = await Promise.all([
-    fetchLatestTokenProfiles().catch(() => []),
-    fetchLatestTokenBoosts().catch(() => []),
-    Promise.all(discoveryQueries().map((query) => searchPairs(query).catch(() => []))).then((results) => results.flat())
-  ]);
-
-  const discoveredAddresses = [
-    ...profiles.map((profile) => profile.tokenAddress),
-    ...boosts.map((boost) => boost.tokenAddress),
-    ...searchResults.map((pair) => pair.baseToken.address),
-    ...forcedWatchlist
-  ];
-
-  const candidates = [...new Set(discoveredAddresses.map((address) => address.toLowerCase()))]
-    .filter((address) => address.startsWith("0x"))
-    .slice(0, Math.max(request.maxTokens * 3, request.maxTokens))
-    .map((address) => parseAddress(address, "discovered token"));
-
-  if (candidates.length === 0) {
-    throw new Error(
-      "No live X Layer candidates found from DexScreener discovery. Add AGENTFUND_DISCOVERY_QUERIES or AGENTFUND_WATCHLIST with token contract addresses."
-    );
-  }
-
-  const [chain, tokens] = await Promise.all([
-    getChainSnapshot(),
-    Promise.all(candidates.map((token) => marketFacts(token).catch(() => undefined)))
-  ]);
-
-  const ranked = tokens
-    .filter((token) => token !== undefined)
-    .sort((a, b) => b.score.score - a.score.score)
-    .slice(0, request.maxTokens);
+  const [chain, ranked] = await Promise.all([getChainSnapshot(), discoverOkxDexOpportunities(request.maxTokens)]);
 
   return {
     strategy: request.strategy,
     chain,
     discovery: {
-      mode: "live_dexscreener_market_discovery",
-      queries: discoveryQueries(),
-      profileCandidates: profiles.length,
-      boostCandidates: boosts.length,
-      searchPairs: searchResults.length,
-      forcedWatchlist: forcedWatchlist.length
+      mode: "okx_dex_aggregator_market_discovery",
+      chainIndex: env.OKX_DEX_CHAIN_INDEX,
+      quoteTokenAddress: env.OKX_DEX_QUOTE_TOKEN_ADDRESS,
+      tokenSource: env.OKX_DEX_TOKENS_PATH,
+      quoteSource: env.OKX_DEX_QUOTE_PATH,
+      ranking: "OKX executable route, route diversity, USD mark context, and price impact"
     },
-    ranked,
+    ranked: ranked.map((opportunity) => ({
+      ...opportunity,
+      priceUsd: markPriceUsd(opportunity),
+      source: "okx_dex_aggregator"
+    })),
     generatedAt: new Date().toISOString()
   };
 }
 
 async function scoreTokenOpportunity(input: unknown) {
   const request = scoreTokenSchema.parse(input);
-  const tokenAddress = parseAddress(request.tokenAddress, "tokenAddress");
+  const tokenAddress = parseRequestedAddress(request.tokenAddress, "tokenAddress");
   const [chain, facts] = await Promise.all([getChainSnapshot(), marketFacts(tokenAddress)]);
 
   return {
@@ -113,7 +143,7 @@ async function scoreTokenOpportunity(input: unknown) {
 
 async function generateTradeSignal(input: unknown) {
   const request = generateTradeSignalSchema.parse(input);
-  const tokenAddress = parseAddress(request.tokenAddress, "tokenAddress");
+  const tokenAddress = parseRequestedAddress(request.tokenAddress, "tokenAddress");
   const facts = await marketFacts(tokenAddress);
   const confidence = confidenceFromScore(facts.score.score);
 
@@ -137,10 +167,10 @@ async function generateTradeSignal(input: unknown) {
 
   return {
     agentName: request.agentName,
-    tokenAddress,
+    tokenAddress: facts.tokenAddress,
     confidence,
     score: facts.score,
-    market: facts.primaryPair,
+    market: facts,
     modelOutput: narrative,
     executionMode: "user_approved",
     generatedAt: new Date().toISOString()
@@ -149,14 +179,17 @@ async function generateTradeSignal(input: unknown) {
 
 async function riskCheckTrade(input: unknown) {
   const request = riskCheckTradeSchema.parse(input);
-  const tokenAddress = parseAddress(request.tokenAddress, "tokenAddress");
+  const tokenAddress = parseRequestedAddress(request.tokenAddress, "tokenAddress");
   const facts = await marketFacts(tokenAddress);
-  const liquidityUsd = facts.primaryPair.liquidity?.usd ?? 0;
-  const tradeToLiquidity = liquidityUsd > 0 ? request.notionalUsd / liquidityUsd : Number.POSITIVE_INFINITY;
   const flags = [...facts.score.riskFlags];
+  const priceImpact = Math.abs(facts.priceImpactPercentage);
 
-  if (tradeToLiquidity > 0.02) {
-    flags.push("trade size exceeds 2% of visible pool liquidity");
+  if (facts.routeCount === 0) {
+    flags.push("OKX route engine did not expose a router path");
+  }
+
+  if (priceImpact > 5) {
+    flags.push("OKX quote price impact exceeds 5%");
   }
 
   if (request.maxSlippageBps > 300) {
@@ -165,14 +198,16 @@ async function riskCheckTrade(input: unknown) {
 
   return {
     side: request.side,
-    tokenAddress,
+    tokenAddress: facts.tokenAddress,
     notionalUsd: request.notionalUsd,
     maxSlippageBps: request.maxSlippageBps,
-    visibleLiquidityUsd: liquidityUsd,
-    tradeToLiquidity: Number(tradeToLiquidity.toFixed(5)),
+    visibleLiquidityUsd: null,
+    okxRouteCount: facts.routeCount,
+    okxQuoteRouteCount: facts.quoteRouteCount,
+    priceImpactPercentage: facts.priceImpactPercentage,
     riskLevel: flags.length >= 3 ? "high" : flags.length >= 1 ? "medium" : "low",
     flags,
-    market: facts.primaryPair,
+    market: facts,
     generatedAt: new Date().toISOString()
   };
 }
@@ -181,20 +216,20 @@ async function simulateStrategyNav(input: unknown) {
   const request = simulateNavSchema.parse(input);
   const positions = await Promise.all(
     request.positions.map(async (position) => {
-      const tokenAddress = parseAddress(position.tokenAddress, "position tokenAddress");
+      const tokenAddress = parseRequestedAddress(position.tokenAddress, "position tokenAddress");
       const facts = await marketFacts(tokenAddress);
-      const priceUsd = Number(facts.primaryPair.priceUsd ?? 0);
+      const priceUsd = facts.priceUsd;
       const markValueUsd = priceUsd * position.units;
 
       return {
-        tokenAddress,
+        tokenAddress: facts.tokenAddress,
         units: position.units,
         priceUsd,
         markValueUsd,
         costBasisUsd: position.costBasisUsd,
         unrealizedPnlUsd:
           typeof position.costBasisUsd === "number" ? markValueUsd - position.costBasisUsd : undefined,
-        symbol: facts.primaryPair.baseToken.symbol
+        symbol: facts.symbol
       };
     })
   );
@@ -214,9 +249,8 @@ async function simulateStrategyNav(input: unknown) {
 
 async function generateAgentUpdatePost(input: unknown) {
   const request = generatePostSchema.parse(input);
-  const facts = request.tokenAddress
-    ? await marketFacts(parseAddress(request.tokenAddress, "tokenAddress"))
-    : undefined;
+  const tokenAddress = parseRequestedAddress(request.tokenAddress, "tokenAddress");
+  const facts = request.tokenAddress ? await marketFacts(tokenAddress) : undefined;
 
   const post = await callStrategyModel([
     {
