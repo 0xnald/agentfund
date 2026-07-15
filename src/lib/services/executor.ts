@@ -3,7 +3,7 @@ import { callStrategyModel } from "@/lib/agent/llm";
 import { confidenceFromScore } from "@/lib/agent/scoring";
 import { discoverUniswapV4Opportunities } from "@/lib/market/uniswapV4";
 import { env } from "@/lib/env";
-import { getChainSnapshot, parseAddress } from "@/lib/xlayer/client";
+import { getChainSnapshot, getTokenMetadata, getWatchlist, parseAddress } from "@/lib/xlayer/client";
 import { ServiceId } from "@/lib/services/catalog";
 import {
   generatePostSchema,
@@ -28,6 +28,19 @@ function parseRequestedAddress(tokenAddress: string | undefined, fieldName: stri
   return parseAddress(tokenAddress, fieldName);
 }
 
+function quoteTokenSet() {
+  return new Set(
+    env.UNISWAP_V4_QUOTE_TOKEN_ADDRESSES.split(",")
+      .map((item) => item.trim().toLowerCase())
+      .filter(Boolean)
+  );
+}
+
+function fallbackWatchlistToken() {
+  const quotes = quoteTokenSet();
+  return getWatchlist().find((tokenAddress) => !quotes.has(tokenAddress.toLowerCase())) ?? getWatchlist()[0];
+}
+
 async function marketFacts(tokenAddress?: `0x${string}`) {
   const opportunities = await discoverUniswapV4Opportunities(tokenAddress ? 50 : 1);
   const opportunity = tokenAddress
@@ -35,8 +48,46 @@ async function marketFacts(tokenAddress?: `0x${string}`) {
     : opportunities[0];
 
   if (!opportunity) {
-    const addressHint = tokenAddress ? ` for token ${tokenAddress}` : "";
-    throw new Error(`No Uniswap v4 X Layer pool opportunity found${addressHint} in the configured scan window.`);
+    const fallbackAddress = tokenAddress ?? fallbackWatchlistToken();
+
+    if (!fallbackAddress) {
+      throw new Error("No Uniswap v4 pool opportunity found and AGENTFUND_WATCHLIST is empty.");
+    }
+
+    const metadata = await getTokenMetadata(fallbackAddress);
+
+    return {
+      ...metadata,
+      poolId: "0x0000000000000000000000000000000000000000000000000000000000000000" as `0x${string}`,
+      priceUsd: 0,
+      source: "xlayer_watchlist_metadata_fallback",
+      pool: {
+        poolManager: env.UNISWAP_V4_POOL_MANAGER_ADDRESS as `0x${string}`,
+        currency0: fallbackAddress,
+        currency1: fallbackAddress,
+        fee: 0,
+        tickSpacing: 0,
+        hooks: "0x0000000000000000000000000000000000000000" as `0x${string}`,
+        initializedAtBlock: "0"
+      },
+      route: {
+        quoteTokenAddress: "0x0000000000000000000000000000000000000000" as `0x${string}`,
+        quoteTokenSymbol: "UNROUTED",
+        direction: "currency0_to_quote" as const,
+        source: "uniswap_v4_pool_sqrt_price" as const
+      },
+      activity: {
+        swapCount: 0,
+        buyPressure: 0,
+        sellPressure: 0
+      },
+      score: {
+        score: 20,
+        grade: "avoid" as const,
+        factors: ["verified token metadata directly from X Layer RPC"],
+        riskFlags: ["no Uniswap v4 quote-routed pool found in configured scan window"]
+      }
+    };
   }
 
   return {
@@ -49,6 +100,29 @@ async function scanXLayerMarket(input: unknown) {
   const request = scanMarketSchema.parse(input);
   const chain = await getChainSnapshot();
   const ranked = await discoverUniswapV4Opportunities(request.maxTokens);
+  const fallbackRanked =
+    ranked.length > 0
+      ? ranked
+      : await Promise.all(
+          getWatchlist()
+            .filter((tokenAddress) => !quoteTokenSet().has(tokenAddress.toLowerCase()))
+            .slice(0, request.maxTokens)
+            .map(async (tokenAddress) => {
+              const metadata = await getTokenMetadata(tokenAddress);
+
+              return {
+                ...metadata,
+                source: "xlayer_watchlist_metadata_fallback",
+                priceUsd: 0,
+                score: {
+                  score: 20,
+                  grade: "avoid" as const,
+                  factors: ["verified token metadata directly from X Layer RPC"],
+                  riskFlags: ["no Uniswap v4 quote-routed pool found in configured scan window"]
+                }
+              };
+            })
+        );
 
   return {
     strategy: request.strategy,
@@ -62,10 +136,11 @@ async function scanXLayerMarket(input: unknown) {
       poolDiscoveryBlocks: env.UNISWAP_V4_POOL_DISCOVERY_BLOCKS,
       swapScanBlocks: env.UNISWAP_V4_SWAP_SCAN_BLOCKS,
       logChunkBlocks: env.UNISWAP_V4_LOG_CHUNK_BLOCKS,
+      status: ranked.length > 0 ? "live" : "fallback_watchlist_metadata",
       quoteTokenAddresses: env.UNISWAP_V4_QUOTE_TOKEN_ADDRESSES.split(",").map((item) => item.trim()).filter(Boolean),
       ranking: "Uniswap v4 initialized pools, recent swap flow, pool liquidity, quote route, fee tier, and hook risk"
     },
-    ranked,
+    ranked: fallbackRanked,
     generatedAt: new Date().toISOString()
   };
 }
