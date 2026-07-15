@@ -1,9 +1,10 @@
 import { z } from "zod";
 import { callStrategyModel } from "@/lib/agent/llm";
 import { confidenceFromScore } from "@/lib/agent/scoring";
+import { researchCandidates } from "@/lib/market/research";
 import { discoverUniswapV4Opportunities } from "@/lib/market/uniswapV4";
 import { env } from "@/lib/env";
-import { getChainSnapshot, getTokenMetadata, getWatchlist, parseAddress } from "@/lib/xlayer/client";
+import { getChainSnapshot, parseAddress } from "@/lib/xlayer/client";
 import { ServiceId } from "@/lib/services/catalog";
 import {
   generatePostSchema,
@@ -28,19 +29,6 @@ function parseRequestedAddress(tokenAddress: string | undefined, fieldName: stri
   return parseAddress(tokenAddress, fieldName);
 }
 
-function quoteTokenSet() {
-  return new Set(
-    env.UNISWAP_V4_QUOTE_TOKEN_ADDRESSES.split(",")
-      .map((item) => item.trim().toLowerCase())
-      .filter(Boolean)
-  );
-}
-
-function fallbackWatchlistToken() {
-  const quotes = quoteTokenSet();
-  return getWatchlist().find((tokenAddress) => !quotes.has(tokenAddress.toLowerCase())) ?? getWatchlist()[0];
-}
-
 async function marketFacts(tokenAddress?: `0x${string}`) {
   const opportunities = await discoverUniswapV4Opportunities(tokenAddress ? 50 : 1);
   const opportunity = tokenAddress
@@ -48,51 +36,44 @@ async function marketFacts(tokenAddress?: `0x${string}`) {
     : opportunities[0];
 
   if (!opportunity) {
-    const fallbackAddress = tokenAddress ?? fallbackWatchlistToken();
-
-    if (!fallbackAddress) {
-      throw new Error("No Uniswap v4 pool opportunity found and AGENTFUND_WATCHLIST is empty.");
-    }
-
-    const metadata = await getTokenMetadata(fallbackAddress);
-
-    return {
-      ...metadata,
-      poolId: "0x0000000000000000000000000000000000000000000000000000000000000000" as `0x${string}`,
-      priceUsd: 0,
-      source: "xlayer_watchlist_metadata_fallback",
-      pool: {
-        poolManager: env.UNISWAP_V4_POOL_MANAGER_ADDRESS as `0x${string}`,
-        currency0: fallbackAddress,
-        currency1: fallbackAddress,
-        fee: 0,
-        tickSpacing: 0,
-        hooks: "0x0000000000000000000000000000000000000000" as `0x${string}`,
-        initializedAtBlock: "0"
-      },
-      route: {
-        quoteTokenAddress: "0x0000000000000000000000000000000000000000" as `0x${string}`,
-        quoteTokenSymbol: "UNROUTED",
-        direction: "currency0_to_quote" as const,
-        source: "uniswap_v4_pool_sqrt_price" as const
-      },
-      activity: {
-        swapCount: 0,
-        buyPressure: 0,
-        sellPressure: 0
-      },
-      score: {
-        score: 20,
-        grade: "avoid" as const,
-        factors: ["verified token metadata directly from X Layer RPC"],
-        riskFlags: ["no Uniswap v4 quote-routed pool found in configured scan window"]
-      }
-    };
+    throw new Error("No Uniswap v4 pool opportunity found in the configured scan window.");
   }
 
   return {
     ...opportunity,
     source: "uniswap_v4_xlayer"
+  };
+}
+
+function recentSwapCount(facts: Awaited<ReturnType<typeof marketFacts>> | Awaited<ReturnType<typeof researchMarketFacts>>) {
+  return "swapCount" in facts.activity ? facts.activity.swapCount : 0;
+}
+
+async function researchMarketFacts(tokenAddress?: `0x${string}`) {
+  const [candidate] = await researchCandidates(1, tokenAddress);
+
+  if (!candidate) {
+    throw new Error("No Uniswap v4 pool opportunity found and no research candidates are configured.");
+  }
+
+  return {
+    ...candidate,
+    poolId: "0x0000000000000000000000000000000000000000000000000000000000000000" as `0x${string}`,
+    pool: {
+      poolManager: env.UNISWAP_V4_POOL_MANAGER_ADDRESS as `0x${string}`,
+      currency0: candidate.tokenAddress,
+      currency1: candidate.tokenAddress,
+      fee: 0,
+      tickSpacing: 0,
+      hooks: "0x0000000000000000000000000000000000000000" as `0x${string}`,
+      initializedAtBlock: "0"
+    },
+    route: {
+      quoteTokenAddress: "0x0000000000000000000000000000000000000000" as `0x${string}`,
+      quoteTokenSymbol: "UNROUTED",
+      direction: "currency0_to_quote" as const,
+      source: "uniswap_v4_pool_sqrt_price" as const
+    }
   };
 }
 
@@ -103,26 +84,7 @@ async function scanXLayerMarket(input: unknown) {
   const fallbackRanked =
     ranked.length > 0
       ? ranked
-      : await Promise.all(
-          getWatchlist()
-            .filter((tokenAddress) => !quoteTokenSet().has(tokenAddress.toLowerCase()))
-            .slice(0, request.maxTokens)
-            .map(async (tokenAddress) => {
-              const metadata = await getTokenMetadata(tokenAddress);
-
-              return {
-                ...metadata,
-                source: "xlayer_watchlist_metadata_fallback",
-                priceUsd: 0,
-                score: {
-                  score: 20,
-                  grade: "avoid" as const,
-                  factors: ["verified token metadata directly from X Layer RPC"],
-                  riskFlags: ["no Uniswap v4 quote-routed pool found in configured scan window"]
-                }
-              };
-            })
-        );
+      : await researchCandidates(request.maxTokens);
 
   return {
     strategy: request.strategy,
@@ -136,7 +98,7 @@ async function scanXLayerMarket(input: unknown) {
       poolDiscoveryBlocks: env.UNISWAP_V4_POOL_DISCOVERY_BLOCKS,
       swapScanBlocks: env.UNISWAP_V4_SWAP_SCAN_BLOCKS,
       logChunkBlocks: env.UNISWAP_V4_LOG_CHUNK_BLOCKS,
-      status: ranked.length > 0 ? "live" : "fallback_watchlist_metadata",
+      status: ranked.length > 0 ? "live" : "research_fallback_transfer_activity",
       quoteTokenAddresses: env.UNISWAP_V4_QUOTE_TOKEN_ADDRESSES.split(",").map((item) => item.trim()).filter(Boolean),
       ranking: "Uniswap v4 initialized pools, recent swap flow, pool liquidity, quote route, fee tier, and hook risk"
     },
@@ -148,7 +110,10 @@ async function scanXLayerMarket(input: unknown) {
 async function scoreTokenOpportunity(input: unknown) {
   const request = scoreTokenSchema.parse(input);
   const tokenAddress = parseRequestedAddress(request.tokenAddress, "tokenAddress");
-  const [chain, facts] = await Promise.all([getChainSnapshot(), marketFacts(tokenAddress)]);
+  const [chain, facts] = await Promise.all([
+    getChainSnapshot(),
+    marketFacts(tokenAddress).catch(() => researchMarketFacts(tokenAddress))
+  ]);
 
   return {
     strategy: request.strategy,
@@ -161,7 +126,7 @@ async function scoreTokenOpportunity(input: unknown) {
 async function generateTradeSignal(input: unknown) {
   const request = generateTradeSignalSchema.parse(input);
   const tokenAddress = parseRequestedAddress(request.tokenAddress, "tokenAddress");
-  const facts = await marketFacts(tokenAddress);
+  const facts = await marketFacts(tokenAddress).catch(() => researchMarketFacts(tokenAddress));
   const confidence = confidenceFromScore(facts.score.score);
 
   const narrative = await callStrategyModel([
@@ -197,10 +162,12 @@ async function generateTradeSignal(input: unknown) {
 async function riskCheckTrade(input: unknown) {
   const request = riskCheckTradeSchema.parse(input);
   const tokenAddress = parseRequestedAddress(request.tokenAddress, "tokenAddress");
-  const facts = await marketFacts(tokenAddress);
+  const facts = await marketFacts(tokenAddress).catch(() => researchMarketFacts(tokenAddress));
   const flags = [...facts.score.riskFlags];
 
-  if (facts.activity.swapCount === 0) {
+  const swapCount = recentSwapCount(facts);
+
+  if (swapCount === 0) {
     flags.push("no recent Uniswap v4 swaps in scan window");
   }
 
@@ -219,7 +186,7 @@ async function riskCheckTrade(input: unknown) {
     maxSlippageBps: request.maxSlippageBps,
     visibleLiquidityUsd: null,
     uniswapPoolId: facts.poolId,
-    recentSwapCount: facts.activity.swapCount,
+    recentSwapCount: swapCount,
     hookAddress: facts.pool.hooks,
     riskLevel: flags.length >= 3 ? "high" : flags.length >= 1 ? "medium" : "low",
     flags,
@@ -233,7 +200,7 @@ async function simulateStrategyNav(input: unknown) {
   const positions = await Promise.all(
     request.positions.map(async (position) => {
       const tokenAddress = parseRequestedAddress(position.tokenAddress, "position tokenAddress");
-      const facts = await marketFacts(tokenAddress);
+      const facts = await marketFacts(tokenAddress).catch(() => researchMarketFacts(tokenAddress));
       const priceUsd = facts.priceUsd;
       const markValueUsd = priceUsd * position.units;
 
@@ -266,7 +233,9 @@ async function simulateStrategyNav(input: unknown) {
 async function generateAgentUpdatePost(input: unknown) {
   const request = generatePostSchema.parse(input);
   const tokenAddress = parseRequestedAddress(request.tokenAddress, "tokenAddress");
-  const facts = request.tokenAddress ? await marketFacts(tokenAddress) : undefined;
+  const facts = request.tokenAddress
+    ? await marketFacts(tokenAddress).catch(() => researchMarketFacts(tokenAddress))
+    : undefined;
 
   const post = await callStrategyModel([
     {

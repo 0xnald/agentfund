@@ -35,6 +35,9 @@ const envSchema = z.object({
   UNISWAP_V4_QUOTE_TOKEN_ADDRESSES: z
     .string()
     .default("0x779ded0c9e1022225f8e0630b35a9b54be713736,0x4ae46a509f6b1d9056937ba4500cb143933d2dc8"),
+  RESEARCH_TRANSFER_SCAN_BLOCKS: z.coerce.number().int().positive().default(1000),
+  RESEARCH_LOG_CHUNK_BLOCKS: z.coerce.number().int().positive().max(100).default(100),
+  RESEARCH_LOG_CONCURRENCY: z.coerce.number().int().positive().max(20).default(2),
   LLM_API_KEY: z.string().optional().default(""),
   LLM_BASE_URL: z.string().url().default("https://router-api.0g.ai/v1"),
   LLM_MODEL: z.string().default("deepseek-v4-flash"),
@@ -81,6 +84,9 @@ export const env = envSchema.parse({
   UNISWAP_V4_LOG_CHUNK_BLOCKS: process.env.UNISWAP_V4_LOG_CHUNK_BLOCKS,
   UNISWAP_V4_LOG_CONCURRENCY: process.env.UNISWAP_V4_LOG_CONCURRENCY,
   UNISWAP_V4_QUOTE_TOKEN_ADDRESSES: process.env.UNISWAP_V4_QUOTE_TOKEN_ADDRESSES,
+  RESEARCH_TRANSFER_SCAN_BLOCKS: process.env.RESEARCH_TRANSFER_SCAN_BLOCKS,
+  RESEARCH_LOG_CHUNK_BLOCKS: process.env.RESEARCH_LOG_CHUNK_BLOCKS,
+  RESEARCH_LOG_CONCURRENCY: process.env.RESEARCH_LOG_CONCURRENCY,
   LLM_API_KEY: process.env.LLM_API_KEY,
   LLM_BASE_URL: process.env.LLM_BASE_URL,
   LLM_MODEL: process.env.LLM_MODEL,
