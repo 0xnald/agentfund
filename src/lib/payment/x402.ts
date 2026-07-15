@@ -6,6 +6,11 @@ import { isServiceId, serviceCatalog } from "@/lib/services/catalog";
 type PaidHandler = (request: NextRequest) => Promise<NextResponse<unknown>>;
 const x402Network = env.X402_NETWORK as Network;
 
+function noStore(response: NextResponse<unknown>) {
+  response.headers.set("Cache-Control", "no-store");
+  return response;
+}
+
 function serviceFromPath(path: string) {
   const service = path.split("/").filter(Boolean).at(-1);
   return service && isServiceId(service) ? service : undefined;
@@ -95,12 +100,12 @@ export function withAgentFundX402(handler: PaidHandler) {
         );
       }
 
-      return handler(request);
+      return noStore(await handler(request));
     };
   }
 
   return async (request: NextRequest) => {
     wrappedHandler ??= await buildWrappedHandler(handler);
-    return wrappedHandler(request);
+    return noStore(await wrappedHandler(request));
   };
 }
