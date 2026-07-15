@@ -82,11 +82,21 @@ let wrappedHandler: ((request: NextRequest) => Promise<NextResponse<unknown>>) |
 
 export function withAgentFundX402(handler: PaidHandler) {
   if (env.AGENTFUND_PAYMENT_MODE === "disabled") {
-    if (env.NODE_ENV === "production") {
-      throw new Error("AGENTFUND_PAYMENT_MODE=disabled is not allowed in production.");
-    }
+    return async (request: NextRequest) => {
+      const isLocalRequest = ["localhost", "127.0.0.1", "::1"].includes(request.nextUrl.hostname);
 
-    return handler;
+      if (env.NODE_ENV === "production" && !isLocalRequest) {
+        return NextResponse.json(
+          {
+            error: "payment_bypass_not_allowed",
+            message: "AGENTFUND_PAYMENT_MODE=disabled is only allowed for localhost testing."
+          },
+          { status: 500 }
+        );
+      }
+
+      return handler(request);
+    };
   }
 
   return async (request: NextRequest) => {
