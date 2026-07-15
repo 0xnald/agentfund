@@ -15,6 +15,7 @@ export default function Home() {
         </a>
         <nav>
           <a href="/api/asp/catalog">Catalog</a>
+          <a href="/api/asp/manifest">Manifest</a>
           <a href="#services">Services</a>
           <a href="#terminal">Terminal</a>
         </nav>

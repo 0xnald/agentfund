@@ -197,6 +197,10 @@ export function AgentTerminal({ services: serviceList }: AgentTerminalProps) {
               <ReceiptText aria-hidden />
               Catalog
             </a>
+            <a href="/api/asp/manifest" target="_blank" rel="noreferrer">
+              <ReceiptText aria-hidden />
+              Manifest
+            </a>
           </div>
         </div>
 
