@@ -18,8 +18,12 @@ export async function callStrategyModel(messages: ChatMessage[]) {
     throw new Error("LLM_API_KEY is not configured.");
   }
 
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), env.LLM_REQUEST_TIMEOUT_MS);
+
   const response = await fetch(`${env.LLM_BASE_URL.replace(/\/$/, "")}/chat/completions`, {
     method: "POST",
+    signal: controller.signal,
     headers: {
       authorization: `Bearer ${env.LLM_API_KEY}`,
       "content-type": "application/json"
@@ -32,7 +36,7 @@ export async function callStrategyModel(messages: ChatMessage[]) {
         trust_mode: env.LLM_TRUST_MODE
       }
     })
-  });
+  }).finally(() => clearTimeout(timeout));
 
   if (!response.ok) {
     const detail = await response.text().catch(() => "");

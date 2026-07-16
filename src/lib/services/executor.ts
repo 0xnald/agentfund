@@ -99,7 +99,7 @@ function normalizeMarketFacts(opportunity: MarketOpportunity) {
 }
 
 async function marketFacts(tokenAddress?: `0x${string}`) {
-  return normalizeMarketFacts(await getMarketOpportunity(tokenAddress));
+  return normalizeMarketFacts(await getMarketOpportunity(tokenAddress, { serviceSafe: true }));
 }
 
 function recentSwapCount(facts: ReturnType<typeof normalizeMarketFacts>) {
@@ -108,7 +108,7 @@ function recentSwapCount(facts: ReturnType<typeof normalizeMarketFacts>) {
 
 async function scanXLayerMarket(input: unknown) {
   const request = scanMarketSchema.parse(input);
-  const snapshot = await getMarketSnapshot({ maxTokens: request.maxTokens });
+  const snapshot = await getMarketSnapshot({ maxTokens: request.maxTokens, serviceSafe: true });
 
   return {
     strategy: request.strategy,

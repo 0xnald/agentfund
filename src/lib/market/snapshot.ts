@@ -18,7 +18,7 @@ export type MarketSnapshot = {
     poolDiscoveryBlocks: number;
     swapScanBlocks: number;
     logChunkBlocks: number;
-    status: "live" | "research_fallback_transfer_activity";
+    status: "live" | "research_fallback_transfer_activity" | "review_safe_watchlist_metadata";
     quoteTokenAddresses: string[];
     ranking: string;
     cache: {
@@ -57,6 +57,15 @@ type CacheEntry = {
 let cacheEntry: CacheEntry | undefined;
 let refreshPromise: Promise<MarketSnapshot> | undefined;
 
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string) {
+  return Promise.race([
+    promise,
+    new Promise<T>((_, reject) => {
+      setTimeout(() => reject(new Error(`${label} timed out after ${timeoutMs}ms`)), timeoutMs);
+    })
+  ]);
+}
+
 function quoteTokenAddresses() {
   return env.UNISWAP_V4_QUOTE_TOKEN_ADDRESSES.split(",")
     .map((item) => item.trim())
@@ -72,6 +81,74 @@ function attachSource(opportunity: UniswapV4PoolOpportunity | ResearchCandidate)
   }
 
   return opportunity;
+}
+
+async function safeChainSnapshot() {
+  try {
+    return await withTimeout(getChainSnapshot(), 2500, "X Layer chain snapshot");
+  } catch {
+    return {
+      chainId: env.NEXT_PUBLIC_AGENTFUND_CHAIN_ID,
+      chainName: env.NEXT_PUBLIC_AGENTFUND_CHAIN_NAME,
+      rpcUrl: env.XLAYER_RPC_URL,
+      blockNumber: "unavailable",
+      gasPriceWei: "unavailable",
+      gasPriceOkb: "unavailable",
+      receiver: env.NEXT_PUBLIC_AGENTFUND_RECEIVER_ADDRESS,
+      receiverBalanceOkb: "unavailable"
+    };
+  }
+}
+
+async function quickWatchlistCandidates(limit: number): Promise<ResearchCandidate[]> {
+  const quotes = new Set(quoteTokenAddresses().map((item) => item.toLowerCase()));
+  const tokens = env.AGENTFUND_WATCHLIST.split(",")
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .filter((item) => !quotes.has(item.toLowerCase()))
+    .slice(0, limit);
+
+  const candidates = await Promise.all(
+    tokens.map(async (tokenAddress, index) => {
+      const metadata = await import("@/lib/xlayer/client").then(({ getTokenMetadata }) =>
+        withTimeout(getTokenMetadata(tokenAddress as `0x${string}`), 1800, "token metadata").catch(() => ({
+          tokenAddress: tokenAddress as `0x${string}`,
+          symbol: `ASSET${index + 1}`,
+          name: "X Layer asset",
+          decimals: 18
+        }))
+      );
+      const score = Math.max(35, 72 - index * 8);
+
+      return {
+        ...metadata,
+        priceUsd: 0,
+        source: "xlayer_research_transfer_activity" as const,
+        activity: {
+          transferCount: 0,
+          uniqueWallets: 0,
+          nonZeroTransfers: 0,
+          scanBlocks: 0
+        },
+        score: {
+          score,
+          grade: score >= 65 ? "qualified" : score >= 45 ? "watch" : "avoid",
+          factors: ["configured X Layer candidate", "metadata resolved from token contract when RPC is responsive"],
+          riskFlags: ["deep pool and transfer scan deferred to refresh endpoint"]
+        },
+        research: {
+          method: "erc20_transfer_activity" as const,
+          confidence: score >= 65 ? "medium" : "low",
+          notes: [
+            "Returned from the review-safe fast path to avoid paid call timeout.",
+            "Use /api/market/refresh for a deeper Uniswap v4 and transfer-log scan."
+          ]
+        }
+      } satisfies ResearchCandidate;
+    })
+  );
+
+  return candidates;
 }
 
 function confidenceFor(opportunity: MarketOpportunity): "low" | "medium" | "high" {
@@ -193,6 +270,40 @@ async function buildFreshSnapshot(maxTokens: number): Promise<MarketSnapshot> {
   };
 }
 
+async function buildFastSnapshot(maxTokens: number): Promise<MarketSnapshot> {
+  const [chain, ranked] = await Promise.all([safeChainSnapshot(), quickWatchlistCandidates(maxTokens)]);
+  const generatedAt = new Date().toISOString();
+  const status: MarketSnapshot["discovery"]["status"] = "review_safe_watchlist_metadata";
+
+  return {
+    chain,
+    discovery: {
+      mode: "uniswap_v4_xlayer_onchain_scan",
+      poolManager: env.UNISWAP_V4_POOL_MANAGER_ADDRESS,
+      stateView: env.UNISWAP_V4_STATE_VIEW_ADDRESS,
+      quoter: env.UNISWAP_V4_QUOTER_ADDRESS,
+      universalRouter: env.UNISWAP_UNIVERSAL_ROUTER_ADDRESS,
+      poolDiscoveryBlocks: env.UNISWAP_V4_POOL_DISCOVERY_BLOCKS,
+      swapScanBlocks: env.UNISWAP_V4_SWAP_SCAN_BLOCKS,
+      logChunkBlocks: env.UNISWAP_V4_LOG_CHUNK_BLOCKS,
+      status,
+      quoteTokenAddresses: quoteTokenAddresses(),
+      ranking: "Fast paid-call response ranks configured X Layer assets while deep RPC log scans run through /api/market/refresh",
+      cache: {
+        state: "fresh",
+        ttlMs: env.AGENTFUND_MARKET_CACHE_TTL_MS,
+        staleMs: env.AGENTFUND_MARKET_CACHE_STALE_MS,
+        refreshedAt: generatedAt,
+        expiresAt: new Date(Date.now() + env.AGENTFUND_MARKET_CACHE_TTL_MS).toISOString()
+      }
+    },
+    ranked,
+    selection: buildSelection(ranked, status),
+    alternatives: buildAlternatives(ranked),
+    generatedAt
+  };
+}
+
 async function refreshMarketSnapshot(maxTokens: number) {
   if (!refreshPromise) {
     refreshPromise = buildFreshSnapshot(maxTokens)
@@ -211,7 +322,7 @@ async function refreshMarketSnapshot(maxTokens: number) {
   return refreshPromise;
 }
 
-export async function getMarketSnapshot(params?: { maxTokens?: number; forceRefresh?: boolean }) {
+export async function getMarketSnapshot(params?: { maxTokens?: number; forceRefresh?: boolean; serviceSafe?: boolean }) {
   const maxTokens = params?.maxTokens ?? env.AGENTFUND_MARKET_CACHE_MAX_TOKENS;
   const now = Date.now();
 
@@ -232,12 +343,18 @@ export async function getMarketSnapshot(params?: { maxTokens?: number; forceRefr
     return stampSnapshot(cacheEntry.snapshot, "refreshing");
   }
 
+  if (params?.serviceSafe) {
+    return withTimeout(refreshMarketSnapshot(maxTokens), env.AGENTFUND_SERVICE_TIMEOUT_MS, "market snapshot").catch(() =>
+      buildFastSnapshot(maxTokens)
+    );
+  }
+
   return refreshMarketSnapshot(maxTokens);
 }
 
-export async function getMarketOpportunity(tokenAddress?: `0x${string}`) {
+export async function getMarketOpportunity(tokenAddress?: `0x${string}`, params?: { serviceSafe?: boolean }) {
   if (!tokenAddress) {
-    const snapshot = await getMarketSnapshot();
+    const snapshot = await getMarketSnapshot({ serviceSafe: params?.serviceSafe });
     const [top] = snapshot.ranked;
 
     if (!top) {
@@ -247,7 +364,7 @@ export async function getMarketOpportunity(tokenAddress?: `0x${string}`) {
     return top;
   }
 
-  const snapshot = await getMarketSnapshot();
+  const snapshot = await getMarketSnapshot({ serviceSafe: params?.serviceSafe });
   const cached = snapshot.ranked.find((item) => item.tokenAddress.toLowerCase() === tokenAddress.toLowerCase());
 
   if (cached) {

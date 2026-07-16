@@ -4,6 +4,8 @@ import { executeService, formatServiceError } from "@/lib/services/executor";
 import { isServiceId, serviceCatalog } from "@/lib/services/catalog";
 
 export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
+export const maxDuration = 60;
 
 async function handler(request: NextRequest) {
   const serviceParam = request.nextUrl.pathname.split("/").filter(Boolean).at(-1) ?? "";
