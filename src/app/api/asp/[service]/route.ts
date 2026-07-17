@@ -33,4 +33,7 @@ async function handler(request: NextRequest) {
   }
 }
 
-export const POST = withAgentFundX402(handler);
+const paidHandler = withAgentFundX402(handler);
+
+export const GET = paidHandler;
+export const POST = paidHandler;
