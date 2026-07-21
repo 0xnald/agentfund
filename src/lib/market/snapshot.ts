@@ -1,11 +1,19 @@
 import { env } from "@/lib/env";
+import {
+  GeckoTerminalDiscoveredCandidate,
+  GeckoTerminalEnrichment,
+  discoverGeckoTerminalCandidates,
+  enrichWithGeckoTerminal
+} from "@/lib/market/geckoterminal";
+import { applyRelativeScoring } from "@/lib/market/relativeScoring";
 import { researchCandidates, ResearchCandidate } from "@/lib/market/research";
 import { discoverUniswapV4Opportunities, UniswapV4PoolOpportunity } from "@/lib/market/uniswapV4";
 import { getChainSnapshot } from "@/lib/xlayer/client";
 
 export type MarketOpportunity =
-  | (UniswapV4PoolOpportunity & { source: "uniswap_v4_xlayer" })
-  | ResearchCandidate;
+  | (UniswapV4PoolOpportunity & { source: "uniswap_v4_xlayer" } & GeckoTerminalEnrichment)
+  | (ResearchCandidate & GeckoTerminalEnrichment)
+  | GeckoTerminalDiscoveredCandidate;
 
 export type MarketSnapshot = {
   chain: Awaited<ReturnType<typeof getChainSnapshot>>;
@@ -20,6 +28,12 @@ export type MarketSnapshot = {
     logChunkBlocks: number;
     status: "live" | "research_fallback_transfer_activity" | "review_safe_watchlist_metadata";
     quoteTokenAddresses: string[];
+    externalSources: Array<{
+      source: "geckoterminal_xlayer";
+      status: "enabled" | "disabled";
+      network: string;
+      purpose: string;
+    }>;
     ranking: string;
     cache: {
       state: "fresh" | "stale" | "refreshing";
@@ -72,6 +86,27 @@ function quoteTokenAddresses() {
     .filter(Boolean);
 }
 
+function enabledDataSources() {
+  return new Set(
+    env.AGENTFUND_DATA_SOURCES.split(",")
+      .map((item) => item.trim().toLowerCase())
+      .filter(Boolean)
+  );
+}
+
+function externalSources() {
+  const sources = enabledDataSources();
+
+  return [
+    {
+      source: "geckoterminal_xlayer" as const,
+      status: sources.has("geckoterminal") ? ("enabled" as const) : ("disabled" as const),
+      network: env.GECKOTERMINAL_NETWORK,
+      purpose: "external X Layer pool liquidity, volume, price, momentum, and transaction validation"
+    }
+  ];
+}
+
 function attachSource(opportunity: UniswapV4PoolOpportunity | ResearchCandidate): MarketOpportunity {
   if ("pool" in opportunity) {
     return {
@@ -81,6 +116,21 @@ function attachSource(opportunity: UniswapV4PoolOpportunity | ResearchCandidate)
   }
 
   return opportunity;
+}
+
+function mergeOpportunities(opportunities: MarketOpportunity[]) {
+  const byToken = new Map<string, MarketOpportunity>();
+
+  for (const opportunity of opportunities) {
+    const key = opportunity.tokenAddress.toLowerCase();
+    const existing = byToken.get(key);
+
+    if (!existing || opportunity.score.score > existing.score.score) {
+      byToken.set(key, opportunity);
+    }
+  }
+
+  return [...byToken.values()];
 }
 
 async function safeChainSnapshot() {
@@ -164,15 +214,28 @@ function activityReason(opportunity: MarketOpportunity) {
     return `${opportunity.activity.swapCount} recent Uniswap v4 swap(s) observed`;
   }
 
+  if ("transactions24h" in opportunity.activity) {
+    return `${opportunity.activity.transactions24h} GeckoTerminal 24h pool transaction(s), $${Math.round(
+      opportunity.activity.volume24hUsd
+    ).toLocaleString()} 24h volume`;
+  }
+
   return `${opportunity.activity.transferCount} recent transfer(s), ${opportunity.activity.uniqueWallets} unique wallet(s) observed`;
 }
 
 function dataGapsFor(opportunity: MarketOpportunity, status: MarketSnapshot["discovery"]["status"]) {
   const gaps = [...opportunity.score.riskFlags];
+  const gecko = opportunity.external?.geckoTerminal;
 
   if (status === "research_fallback_transfer_activity") {
     gaps.push("No quote-routed Uniswap v4 pool was found in the configured scan window.");
     gaps.push("Price, depth, and slippage remain unavailable until a routed pool is discovered.");
+  }
+
+  if (!gecko || gecko.status === "failed") {
+    gaps.push("GeckoTerminal X Layer pool validation is unavailable.");
+  } else if (gecko.status === "partial") {
+    gaps.push(...gecko.warnings);
   }
 
   return [...new Set(gaps)];
@@ -232,10 +295,21 @@ function stampSnapshot(snapshot: MarketSnapshot, state: MarketSnapshot["discover
 
 async function buildFreshSnapshot(maxTokens: number): Promise<MarketSnapshot> {
   const chain = await getChainSnapshot();
-  const liveRanked = await discoverUniswapV4Opportunities(maxTokens);
+  const [liveRanked, geckoDiscovered] = await Promise.all([
+    discoverUniswapV4Opportunities(maxTokens),
+    discoverGeckoTerminalCandidates(maxTokens)
+  ]);
   const status: MarketSnapshot["discovery"]["status"] =
     liveRanked.length > 0 ? "live" : "research_fallback_transfer_activity";
-  const ranked = (liveRanked.length > 0 ? liveRanked : await researchCandidates(maxTokens)).map(attachSource);
+  const transferRanked = liveRanked.length > 0 ? [] : await researchCandidates(maxTokens);
+  const baseRanked = mergeOpportunities([
+    ...liveRanked.map(attachSource),
+    ...transferRanked.map(attachSource),
+    ...geckoDiscovered
+  ]);
+  const ranked = applyRelativeScoring(await enrichWithGeckoTerminal(baseRanked))
+    .sort((a, b) => b.score.score - a.score.score)
+    .slice(0, maxTokens);
   const generatedAt = new Date().toISOString();
 
   return {
@@ -251,10 +325,11 @@ async function buildFreshSnapshot(maxTokens: number): Promise<MarketSnapshot> {
       logChunkBlocks: env.UNISWAP_V4_LOG_CHUNK_BLOCKS,
       status,
       quoteTokenAddresses: quoteTokenAddresses(),
+      externalSources: externalSources(),
       ranking:
         status === "live"
-          ? "Uniswap v4 initialized pools, recent swap flow, pool liquidity, quote route, fee tier, and hook risk"
-          : "Fallback research ranks configured X Layer assets by live ERC-20 transfer activity and wallet breadth",
+          ? "Uniswap v4 initialized pools, recent swap flow, pool liquidity, quote route, fee tier, hook risk, and GeckoTerminal X Layer pool discovery/validation"
+          : "Fallback research ranks configured X Layer assets and live GeckoTerminal X Layer pool discoveries by transfer activity, wallet breadth, liquidity, volume, momentum, and source confidence",
       cache: {
         state: "fresh",
         ttlMs: env.AGENTFUND_MARKET_CACHE_TTL_MS,
@@ -271,7 +346,14 @@ async function buildFreshSnapshot(maxTokens: number): Promise<MarketSnapshot> {
 }
 
 async function buildFastSnapshot(maxTokens: number): Promise<MarketSnapshot> {
-  const [chain, ranked] = await Promise.all([safeChainSnapshot(), quickWatchlistCandidates(maxTokens)]);
+  const [chain, quickRanked, geckoDiscovered] = await Promise.all([
+    safeChainSnapshot(),
+    quickWatchlistCandidates(maxTokens),
+    discoverGeckoTerminalCandidates(maxTokens)
+  ]);
+  const ranked = applyRelativeScoring(await enrichWithGeckoTerminal(mergeOpportunities([...quickRanked, ...geckoDiscovered])))
+    .sort((a, b) => b.score.score - a.score.score)
+    .slice(0, maxTokens);
   const generatedAt = new Date().toISOString();
   const status: MarketSnapshot["discovery"]["status"] = "review_safe_watchlist_metadata";
 
@@ -288,7 +370,9 @@ async function buildFastSnapshot(maxTokens: number): Promise<MarketSnapshot> {
       logChunkBlocks: env.UNISWAP_V4_LOG_CHUNK_BLOCKS,
       status,
       quoteTokenAddresses: quoteTokenAddresses(),
-      ranking: "Fast paid-call response ranks configured X Layer assets while deep RPC log scans run through /api/market/refresh",
+      externalSources: externalSources(),
+      ranking:
+        "Fast paid-call response ranks configured X Layer assets and GeckoTerminal X Layer pool discoveries while deep RPC log scans run through /api/market/refresh",
       cache: {
         state: "fresh",
         ttlMs: env.AGENTFUND_MARKET_CACHE_TTL_MS,

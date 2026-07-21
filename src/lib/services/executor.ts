@@ -41,15 +41,32 @@ function opportunityReason(opportunity: MarketOpportunity) {
     return `${opportunity.activity.swapCount} recent Uniswap v4 swap(s) observed`;
   }
 
+  if ("transactions24h" in opportunity.activity) {
+    return `${opportunity.activity.transactions24h} GeckoTerminal 24h pool transaction(s), $${Math.round(
+      opportunity.activity.volume24hUsd
+    ).toLocaleString()} 24h volume`;
+  }
+
   return `${opportunity.activity.transferCount} recent transfer(s), ${opportunity.activity.uniqueWallets} unique wallet(s) observed`;
 }
 
 function opportunityDataGaps(opportunity: MarketOpportunity) {
   const gaps = [...opportunity.score.riskFlags];
+  const gecko = opportunity.external?.geckoTerminal;
 
-  if (!("pool" in opportunity)) {
+  if (!("pool" in opportunity) && opportunity.source !== "geckoterminal_xlayer_discovery") {
     gaps.push("No quote-routed Uniswap v4 pool was found in the configured scan window.");
     gaps.push("Price, depth, and slippage remain unavailable until a routed pool is discovered.");
+  }
+
+  if (opportunity.source === "geckoterminal_xlayer_discovery") {
+    gaps.push("Token was discovered from GeckoTerminal X Layer pools and still needs native X Layer transfer or Uniswap v4 route confirmation.");
+  }
+
+  if (!gecko || gecko.status === "failed") {
+    gaps.push("GeckoTerminal X Layer validation is unavailable.");
+  } else if (gecko.status === "partial") {
+    gaps.push(...gecko.warnings);
   }
 
   return [...new Set(gaps)];
@@ -76,7 +93,7 @@ function normalizeMarketFacts(opportunity: MarketOpportunity) {
     };
   }
 
-  return {
+  const normalized = {
     ...opportunity,
     intelligence: opportunityIntelligence(opportunity),
     poolId: "0x0000000000000000000000000000000000000000000000000000000000000000" as `0x${string}`,
@@ -96,6 +113,8 @@ function normalizeMarketFacts(opportunity: MarketOpportunity) {
       source: "uniswap_v4_pool_sqrt_price" as const
     }
   };
+
+  return normalized;
 }
 
 async function marketFacts(tokenAddress?: `0x${string}`) {
